@@ -1,0 +1,159 @@
+/*
+ * Cartas — visual PROVISÓRIO. Todo o estilo de carta fica neste arquivo para
+ * poder ser trocado depois sem mexer no resto da interface.
+ */
+
+:root {
+  --card-w: 96px;
+  --card-radius: 12px;
+  --card-face: #ffffff;
+  --card-ink: #1c1c1c;
+  --card-ink-ace: #a3201c;
+  --card-lock: #e5b94e;
+  --card-back-a: #7b1e1e;
+  --card-back-b: #962b2b;
+}
+
+.card {
+  position: relative;
+  flex: 0 0 auto;
+  width: var(--card-w);
+  aspect-ratio: 5 / 7;
+  padding: 0;
+  border: 2px solid rgba(0, 0, 0, 0.12);
+  border-radius: var(--card-radius);
+  background: var(--card-face);
+  color: var(--card-ink);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-weight: 700;
+  box-shadow:
+    0 2px 0 rgba(0, 0, 0, 0.15),
+    0 8px 18px rgba(0, 0, 0, 0.35);
+  cursor: pointer;
+  user-select: none;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    border-color 0.15s ease;
+}
+
+.card:disabled {
+  cursor: default;
+}
+
+.card:not(:disabled):hover {
+  transform: translateY(-4px);
+}
+
+.card:focus-visible {
+  outline: 3px solid var(--card-lock);
+  outline-offset: 3px;
+}
+
+.card__value {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: calc(var(--card-w) * 0.52);
+  line-height: 1;
+}
+
+.card__corner {
+  position: absolute;
+  font-size: calc(var(--card-w) * 0.19);
+  line-height: 1;
+}
+
+.card__corner--top {
+  top: calc(var(--card-w) * 0.07);
+  left: calc(var(--card-w) * 0.09);
+}
+
+.card__corner--bottom {
+  right: calc(var(--card-w) * 0.09);
+  bottom: calc(var(--card-w) * 0.07);
+  transform: rotate(180deg);
+}
+
+/* Trancada: levantada, com borda dourada e cadeado */
+.card--locked,
+.card--locked:not(:disabled):hover {
+  transform: translateY(-12px);
+  border-color: var(--card-lock);
+  box-shadow:
+    0 0 0 3px rgba(229, 185, 78, 0.45),
+    0 14px 22px rgba(0, 0, 0, 0.4);
+}
+
+.card__lock {
+  position: absolute;
+  top: -12px;
+  right: -12px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--card-lock);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+  font-size: 14px;
+  line-height: 1;
+}
+
+/* Verso (antes da 1ª tirada) */
+.card--back {
+  border: 4px solid var(--card-face);
+  background: repeating-linear-gradient(
+    45deg,
+    var(--card-back-a) 0 7px,
+    var(--card-back-b) 7px 14px
+  );
+  cursor: default;
+}
+
+/* Animação ao tirar */
+.card--dealt {
+  /* backwards: aplica o estado inicial durante o atraso, sem prender o transform depois */
+  animation: card-deal 0.45s cubic-bezier(0.2, 0.8, 0.3, 1.15) backwards;
+  animation-delay: var(--deal-delay, 0ms);
+}
+
+@keyframes card-deal {
+  from {
+    opacity: 0;
+    transform: translateY(-48px) rotateY(90deg) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (max-width: 760px) {
+  :root {
+    --card-w: min(16vw, 76px);
+    --card-radius: 9px;
+  }
+
+  .card__lock {
+    top: -10px;
+    right: -8px;
+    width: 22px;
+    height: 22px;
+    font-size: 11px;
+  }
+
+  .card--locked,
+  .card--locked:not(:disabled):hover {
+    transform: translateY(-8px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .card--dealt {
+    animation: none;
+    transition: none;
+  }
+}
