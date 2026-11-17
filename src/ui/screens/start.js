@@ -2,7 +2,7 @@ import { NPCS } from '../../ai/index.js';
 import { MODES } from '../../core/modes.js';
 import { ALISHOW } from '../characters.js';
 import { h } from '../dom.js';
-import { categoryName, categoryTooltip, pluralize, stars } from '../texts.js';
+import { categoryName, pluralize, stars } from '../texts.js';
 
 export const NAME_MAX_LENGTH = 16;
 export const DEFAULT_NAMES = ['Jogador 1', 'Jogador 2'];
@@ -179,7 +179,7 @@ export function showStart(root, { initial, onPlay }) {
         h(
           'span',
           { class: 'chips' },
-          mode.categories.map((id) => h('span', { class: 'chip', title: categoryTooltip(id) }, categoryName(id))),
+          mode.categories.map((id) => h('span', { class: 'chip' }, categoryName(id))),
         ),
       ),
     );

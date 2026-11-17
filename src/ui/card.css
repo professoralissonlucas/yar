@@ -112,6 +112,44 @@
   cursor: default;
 }
 
+/* Tamanho na mão: pela largura da área das cartas (container, cqi) e pela
+   altura da janela (vh), para a mesa caber sem rolagem. */
+.hand {
+  --card-w: clamp(52px, min(16cqi, 15vh), 96px);
+}
+
+@media (max-width: 999.98px) {
+  .hand {
+    --card-w: clamp(44px, min(18cqi, 12vh), 80px);
+  }
+}
+
+/* Mini-cartas (exemplo na dica das categorias) */
+.mini-hand {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.mini-card {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 28px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 4px;
+  background: var(--card-face);
+  color: var(--card-ink);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.mini-card--ace {
+  color: var(--card-ink-ace);
+}
+
 /* Animação ao tirar */
 .card--dealt {
   /* backwards: aplica o estado inicial durante o atraso, sem prender o transform depois */
@@ -132,7 +170,6 @@
 
 @media (max-width: 760px) {
   :root {
-    --card-w: min(16vw, 76px);
     --card-radius: 9px;
   }
 

@@ -22,11 +22,11 @@ describe('CATEGORIES', () => {
     ]);
   });
 
-  it('usa os nomes PT-BR e Garra de Dragão vai até 24', () => {
+  it('usa os nomes convencionais e Quadra vai até 24', () => {
     const byId = Object.fromEntries(CATEGORIES.map((c) => [c.id, c]));
-    expect(byId.ones.name).toBe('Fragmento Um');
-    expect(byId.full_house.name).toBe('Sedução do Lobo');
-    expect(byId.chance.name).toBe('Kkakdugi');
+    expect(byId.ones.name).toBe('Uns');
+    expect(byId.full_house.name).toBe('Full House');
+    expect(byId.chance.name).toBe('Chance');
     expect(byId.four_kind.max).toBe(24);
   });
 });
@@ -56,7 +56,7 @@ describe('scoreHand', () => {
   });
 });
 
-describe('seção de números (Fragmento Um … Seis Buquês)', () => {
+describe('seção de números (Uns … Seis)', () => {
   it.each([
     ['ones', [1, 1, 3, 1, 5], 3],
     ['twos', [2, 2, 3, 4, 5], 4],
@@ -87,7 +87,7 @@ describe('seção de números (Fragmento Um … Seis Buquês)', () => {
   });
 });
 
-describe('Parceiro (pair)', () => {
+describe('Par (pair)', () => {
   it('soma só o par de maior valor', () => {
     expect(scoreHand([6, 6, 2, 2, 3]).pair).toBe(12);
     expect(scoreHand([2, 6, 3, 2, 6]).pair).toBe(12);
@@ -108,7 +108,7 @@ describe('Parceiro (pair)', () => {
   });
 });
 
-describe('Pico (three_kind)', () => {
+describe('Trinca (three_kind)', () => {
   it('soma só as 3 cartas iguais', () => {
     expect(scoreHand([3, 3, 3, 6, 5]).three_kind).toBe(9);
     expect(scoreHand([6, 2, 6, 1, 6]).three_kind).toBe(18);
@@ -125,7 +125,7 @@ describe('Pico (three_kind)', () => {
   });
 });
 
-describe('Garra de Dragão (four_kind)', () => {
+describe('Quadra (four_kind)', () => {
   it('soma só as 4 cartas iguais, máximo 24', () => {
     expect(scoreHand([2, 2, 2, 2, 6]).four_kind).toBe(8);
     expect(scoreHand([6, 6, 1, 6, 6]).four_kind).toBe(24);
@@ -137,13 +137,13 @@ describe('Garra de Dragão (four_kind)', () => {
   });
 });
 
-describe('Rude (two_pair)', () => {
+describe('Dois Pares (two_pair)', () => {
   it('vale 15 com dois pares de valores diferentes', () => {
     expect(scoreHand([1, 1, 2, 2, 6]).two_pair).toBe(15);
     expect(scoreHand([4, 6, 4, 3, 6]).two_pair).toBe(15);
   });
 
-  it('full house também conta como Rude', () => {
+  it('full house também conta como Dois Pares', () => {
     expect(scoreHand([3, 3, 3, 5, 5]).two_pair).toBe(15);
   });
 
@@ -161,7 +161,7 @@ describe('Rude (two_pair)', () => {
   });
 });
 
-describe('Sedução do Lobo (full_house)', () => {
+describe('Full House (full_house)', () => {
   it('vale 25 com trinca + par de outro valor, em qualquer ordem', () => {
     expect(scoreHand([3, 3, 3, 5, 5]).full_house).toBe(25);
     expect(scoreHand([5, 3, 5, 3, 3]).full_house).toBe(25);
@@ -189,7 +189,7 @@ describe('Yar!', () => {
     expect(scoreHand([6, 6, 6, 6, 5]).yar).toBe(0);
   });
 
-  it('cinco iguais: Yar 50, Garra/Pico/Parceiro só 4/3/2 cartas, sem Rude/Sedução', () => {
+  it('cinco iguais: Yar 50, Quadra/Trinca/Par só 4/3/2 cartas, sem Dois Pares/Full House', () => {
     expect(scoreHand([3, 3, 3, 3, 3])).toMatchObject({
       yar: 50,
       four_kind: 12,
@@ -205,7 +205,7 @@ describe('Yar!', () => {
   });
 });
 
-describe('Estrada Bifurcada (small_straight)', () => {
+describe('Sequência Menor (small_straight)', () => {
   it.each([
     [[1, 2, 3, 4, 6]],
     [[2, 3, 4, 5, 2]],
@@ -219,7 +219,7 @@ describe('Estrada Bifurcada (small_straight)', () => {
     expect(scoreHand([6, 4, 5, 3, 6]).small_straight).toBe(30);
   });
 
-  it('Corda (sequência de 5) também conta como Estrada', () => {
+  it('Sequência Maior (sequência de 5) também conta como Menor', () => {
     expect(scoreHand([5, 3, 1, 4, 2]).small_straight).toBe(30);
     expect(scoreHand([6, 4, 2, 5, 3]).small_straight).toBe(30);
   });
@@ -231,7 +231,7 @@ describe('Estrada Bifurcada (small_straight)', () => {
   });
 });
 
-describe('Corda (large_straight)', () => {
+describe('Sequência Maior (large_straight)', () => {
   it('vale 40 com 1-2-3-4-5 ou 2-3-4-5-6 em qualquer ordem', () => {
     expect(scoreHand([1, 2, 3, 4, 5]).large_straight).toBe(40);
     expect(scoreHand([5, 3, 1, 4, 2]).large_straight).toBe(40);
@@ -246,7 +246,7 @@ describe('Corda (large_straight)', () => {
   });
 });
 
-describe('Kkakdugi (chance)', () => {
+describe('Chance (chance)', () => {
   it('soma todas as cartas, de 5 a 30', () => {
     expect(scoreHand([1, 1, 1, 1, 1]).chance).toBe(5);
     expect(scoreHand([6, 6, 6, 6, 6]).chance).toBe(30);

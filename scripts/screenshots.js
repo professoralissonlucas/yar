@@ -1,6 +1,12 @@
 /**
- * Prints para conferência visual: tela inicial, mesa (vez do jogador e vez do
- * professor) e fim de jogo, em 1280 px e 390 px de largura.
+ * Prints para conferência visual (modo Completo, contra o Prof. Alishow).
+ * - 1280×800 e 390×750: tela inicial, mesa (jogador, dica aberta, professor),
+ *   fim de jogo e mesa local.
+ * - 1366×657, 1536×730, 1920×969 e 1280×620 (área útil de navegadores comuns):
+ *   só a mesa (jogador, dica aberta, professor); depois sai da partida.
+ * Em cada print: há rolagem na página? cartas e botão inteiros na janela?
+ * Na vez do jogador, abre a dica de todas as categorias (Tab) e confere que
+ * ela não sai da tela nem cobre as cartas. No fim, imprime um resumo.
  *
  * Uso: npm run screenshots   (faz o build e roda este script)
  * Saída: screenshots/*.png
@@ -29,9 +35,17 @@ const PREVIEW_TIMEOUT_MS = 15_000;
 const STOP_TIMEOUT_MS = 3_000;
 const STDERR_LIMIT = 4096;
 const VIEWPORTS = [
-  { name: '1280', viewport: { width: 1280, height: 800 } },
-  { name: '390', viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
+  { name: '1280x800', full: true, viewport: { width: 1280, height: 800 } },
+  { name: '390x750', full: true, viewport: { width: 390, height: 750 }, isMobile: true, hasTouch: true },
+  { name: '1366x657', viewport: { width: 1366, height: 657 } },
+  { name: '1536x730', viewport: { width: 1536, height: 730 } },
+  { name: '1920x969', viewport: { width: 1920, height: 969 } },
+  { name: '1280x620', viewport: { width: 1280, height: 620 } },
 ];
+
+/** Resultado das checagens de cada print (resumo no fim). */
+const results = [];
+const tipReports = [];
 
 /** Recursos abertos, para o cleanup (inclusive no Ctrl+C). */
 let activePreview = null;
@@ -168,14 +182,95 @@ function seedRandom(seed) {
   };
 }
 
-async function shoot(page, name, size) {
-  const path = `${OUT}${name}-${size}.png`;
-  await page.screenshot({ path, fullPage: true, animations: 'disabled' });
-  console.log('  ✓', `screenshots/${name}-${size}.png`);
+/** Rolagem da página e visibilidade das cartas/botão (no navegador). */
+function measureLayout() {
+  const de = document.documentElement;
+  const whole = (el) => {
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return r.top >= 0 && r.left >= 0 && r.bottom <= innerHeight + 0.5 && r.right <= innerWidth + 0.5;
+  };
+  const panel = document.querySelector('.table-screen .score-panel');
+  return {
+    vScroll: de.scrollHeight > innerHeight,
+    hScroll: de.scrollWidth > innerWidth,
+    scrollHeight: de.scrollHeight,
+    innerHeight,
+    cards: whole(document.querySelector('.table-screen .hand')),
+    button: whole(document.querySelector('.table-screen .draw-button')),
+    tableScrolls: panel ? panel.scrollHeight > panel.clientHeight + 1 : null,
+  };
 }
 
-async function run(browser, url, { name: size, ...contextOptions }) {
-  console.log(`${size} px`);
+/**
+ * Abre a dica de cada categoria pelo foco (como no Tab) e confere que ela
+ * abre, não sai da tela e não cobre as cartas. Roda no navegador.
+ */
+function sweepTips() {
+  const problems = [];
+  const buttons = [...document.querySelectorAll('.table-screen .cat-name')];
+  for (const btn of buttons) {
+    const id = btn.dataset.catTip;
+    btn.scrollIntoView({ block: 'nearest' });
+    btn.focus();
+    const tip = document.querySelector('.cat-tip');
+    if (!tip || tip.hidden) {
+      problems.push(`${id}: não abriu`);
+      continue;
+    }
+    const r = tip.getBoundingClientRect();
+    const hand = document.querySelector('.table-screen .hand')?.getBoundingClientRect();
+    if (r.left < 0 || r.top < 0 || r.right > innerWidth || r.bottom > innerHeight) problems.push(`${id}: sai da tela`);
+    if (hand && r.left < hand.right && hand.left < r.right && r.top < hand.bottom && hand.top < r.bottom) {
+      problems.push(`${id}: cobre as cartas`);
+    }
+    const describedBy = btn.getAttribute('aria-describedby');
+    if (!describedBy || !document.getElementById(describedBy)?.textContent) {
+      problems.push(`${id}: sem aria-describedby`);
+    }
+  }
+  document.activeElement?.blur();
+  return { checked: buttons.length, problems };
+}
+
+async function shoot(page, name, size) {
+  const file = `${name}-${size}.png`;
+  await page.screenshot({ path: `${OUT}${file}`, fullPage: true, animations: 'disabled' });
+  const layout = await page.evaluate(measureLayout);
+  results.push({ print: file, ...layout });
+  const flag = layout.vScroll || layout.hScroll ? '  ! ROLAGEM' : '';
+  console.log('  ✓', `screenshots/${file}`, flag);
+}
+
+/** Dica aberta (mouse no desktop, toque no celular) + varredura de todas as categorias. */
+async function checkTips(page, size, touch) {
+  const trigger = page.locator('.cat-name').filter({ hasText: 'Trinca' });
+  if (touch) await trigger.tap();
+  else await trigger.hover();
+  const tip = page.locator('.cat-tip');
+  if (!(await tip.isVisible())) throw new Error('a dica da Trinca não abriu');
+  const text = await tip.innerText();
+  if (!text.includes('Sua mão agora')) console.warn('  ! a dica não mostrou "Sua mão agora"');
+  await shoot(page, 'tip', size);
+  if (touch) {
+    await trigger.tap(); // toca de novo: fecha
+    if (await tip.isVisible()) console.warn('  ! tocar de novo não fechou a dica');
+  } else {
+    await page.mouse.move(1, 1);
+    if (await tip.isVisible()) console.warn('  ! tirar o mouse não fechou a dica');
+  }
+  // o relógio é falso (page.clock): avança para sair da janela "foco logo
+  // depois de um toque", que no uso real dura 0,8 s
+  await page.clock.runFor(1000);
+  await page.keyboard.press('Shift'); // foco "de teclado" (:focus-visible)
+  const report = await page.evaluate(sweepTips);
+  tipReports.push({ size, ...report });
+  console.log(`  ✓ dica conferida em ${report.checked} categorias`, report.problems.length ? report.problems : '');
+}
+
+async function run(browser, url, { name: size, full = false, ...contextOptions }) {
+  console.log(size);
+  const touch = Boolean(contextOptions.hasTouch);
   const context = await browser.newContext({ ...contextOptions, locale: 'pt-BR' });
   try {
     await context.addInitScript(seedRandom, SEED);
@@ -192,20 +287,25 @@ async function run(browser, url, { name: size, ...contextOptions }) {
     await nameInput.fill('   ');
     const play = page.getByRole('button', { name: 'Jogar' });
     if (!(await play.isDisabled())) throw new Error('"Jogar" deveria ficar desabilitado sem nome');
-    console.log('  ✓ "Jogar" desabilitado sem nome:', await page.locator('.form-hint').textContent());
+    if (full) console.log('  ✓ "Jogar" desabilitado sem nome:', await page.locator('.form-hint').textContent());
     await nameInput.fill('Ana');
     if (!(await play.isEnabled())) throw new Error('"Jogar" deveria habilitar com nome');
     await page.locator('label.option--level').filter({ hasText: 'Exigente' }).click();
     await page.locator('label.option--mode').filter({ hasText: 'Completo' }).click();
     await page.waitForTimeout(50);
-    await shoot(page, 'home', size);
+    if (full) await shoot(page, 'home', size);
 
     // ---- partida ----
     await page.getByRole('button', { name: 'Jogar' }).click();
     const shots = { player: false, professor: false };
+    let finished = false;
 
     for (let step = 0; step < 4000; step++) {
-      if (await page.locator('.gameover-screen').count()) break;
+      if (await page.locator('.gameover-screen').count()) {
+        finished = true;
+        break;
+      }
+      if (!full && shots.player && shots.professor) break;
 
       const notice = page.locator('.overlay--notice');
       if (await notice.count()) {
@@ -248,6 +348,7 @@ async function run(browser, url, { name: size, ...contextOptions }) {
         if (!shots.player) {
           await page.locator('button.card').first().click(); // uma carta trancada
           await shoot(page, 'table-player', size);
+          await checkTips(page, size, touch);
           shots.player = true;
         }
         const good = page.locator('button.preview:not(.preview--zero)');
@@ -257,23 +358,50 @@ async function run(browser, url, { name: size, ...contextOptions }) {
       }
       await page.clock.runFor(100);
     }
-
-    await page.clock.runFor(3000); // balão e animação do resultado
-    await shoot(page, 'gameover', size);
     if (!shots.player || !shots.professor) console.warn('  ! faltou print da mesa:', shots);
 
-    // ---- modo local (2 jogadores): mesa sem personagem ----
-    await page.getByRole('button', { name: 'Voltar ao início' }).click();
-    await page.getByText('2 jogadores', { exact: true }).first().click();
-    await page.getByRole('button', { name: 'Jogar' }).click();
-    await page.locator('.overlay--notice').click();
-    await page.clock.runFor(60);
-    await page.locator('.draw-button').click();
-    await page.clock.runFor(60);
-    await shoot(page, 'table-local', size);
+    if (!full) {
+      // só a mesa: sai da partida
+      await page.getByRole('button', { name: 'Sair', exact: true }).click();
+      await page.locator('.dialog .btn--danger').click();
+      await page.clock.runFor(60);
+    } else {
+      if (!finished) throw new Error('a partida não terminou');
+      await page.clock.runFor(3000); // balão e animação do resultado
+      await shoot(page, 'gameover', size);
+
+      // ---- modo local (2 jogadores): mesa sem personagem ----
+      await page.getByRole('button', { name: 'Voltar ao início' }).click();
+      await page.getByText('2 jogadores', { exact: true }).first().click();
+      await page.getByRole('button', { name: 'Jogar' }).click();
+      await page.locator('.overlay--notice').click();
+      await page.clock.runFor(60);
+      await page.locator('.draw-button').click();
+      await page.clock.runFor(60);
+      await shoot(page, 'table-local', size);
+    }
     if (errors.length) console.warn('  ! erros no console:', errors);
   } finally {
     await context.close().catch(() => {});
+  }
+}
+
+function printSummary() {
+  const yesNo = (v) => (v == null ? '—' : v ? 'sim' : 'não');
+  console.log('\nResumo (rolagem = document.documentElement.scrollHeight > innerHeight):');
+  console.table(
+    results.map((r) => ({
+      print: r.print,
+      'rolagem vertical': yesNo(r.vScroll),
+      'rolagem horizontal': yesNo(r.hScroll),
+      'scrollHeight / innerHeight': `${r.scrollHeight} / ${r.innerHeight}`,
+      'cartas inteiras': yesNo(r.cards),
+      'botão inteiro': yesNo(r.button),
+      'tabela rola por dentro': yesNo(r.tableScrolls),
+    })),
+  );
+  for (const t of tipReports) {
+    console.log(`dica ${t.size}: ${t.checked} categorias,`, t.problems.length ? `problemas: ${t.problems.join('; ')}` : 'ok');
   }
 }
 
@@ -290,4 +418,5 @@ try {
   console.error('\n✗', error?.stack ?? error);
 } finally {
   await cleanup();
+  if (results.length) printSummary();
 }

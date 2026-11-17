@@ -61,13 +61,13 @@ describe('reações do professor (dono do personagem)', () => {
     expect(reactToOwnScore({ categoryId: 'yar', points: 0 })).toBe('annoyed');
   });
 
-  it('ele marca Yar!, Corda ou Sedução do Lobo → empolgado', () => {
+  it('ele marca Yar!, Sequência Maior ou Full House → empolgado', () => {
     expect(reactToOwnScore({ categoryId: 'yar', points: 50 })).toBe('excited');
     expect(reactToOwnScore({ categoryId: 'large_straight', points: 40 })).toBe('excited');
     expect(reactToOwnScore({ categoryId: 'full_house', points: 25 })).toBe('excited');
   });
 
-  it('ele marca Rude, Estrada ou 60%+ numa categoria variável → feliz', () => {
+  it('ele marca Dois Pares, Sequência Menor ou 60%+ numa categoria variável → feliz', () => {
     expect(reactToOwnScore({ categoryId: 'two_pair', points: 15 })).toBe('happy');
     expect(reactToOwnScore({ categoryId: 'small_straight', points: 30 })).toBe('happy');
     expect(reactToOwnScore({ categoryId: 'fives', points: 20 })).toBe('happy'); // 4 cincos

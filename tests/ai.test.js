@@ -144,7 +144,7 @@ describe('comportamento', () => {
     });
   });
 
-  it('Difícil e Médio marcam Corda quando já têm', () => {
+  it('Difícil e Médio marcam Sequência Maior quando já têm', () => {
     const state = stateWithHand([5, 3, 1, 4, 2]);
     expect(mediumDecide(state, 'npc', noRandom)).toEqual({ type: 'score', category: 'large_straight' });
     expect(getNpc('hard').decideAction(state, 'npc', createSeededRng(1))).toEqual({
@@ -153,7 +153,7 @@ describe('comportamento', () => {
     });
   });
 
-  it('quando nada pontua, Médio e Difícil zeram uma categoria barata, nunca a Corda', () => {
+  it('quando nada pontua, Médio e Difícil zeram uma categoria barata, nunca a Sequência Maior', () => {
     const filled = Object.fromEntries(
       CATEGORY_IDS.filter((c) => !['ones', 'yar', 'large_straight'].includes(c)).map((c) => [c, 5]),
     );
@@ -166,11 +166,11 @@ describe('comportamento', () => {
     }
   });
 
-  it('no começo da partida, Médio prefere zerar Fragmento Um a Yar! e evita gastar Kkakdugi', () => {
+  it('no começo da partida, Médio prefere zerar Uns a Yar! e evita gastar Chance', () => {
     const state = stateWithHand([2, 2, 3, 3, 6], { drawsUsed: 4 });
     const { gainOf } = categoryGains(state, 'npc');
     expect(gainOf('ones')).toBeGreaterThan(gainOf('yar'));
-    expect(gainOf('chance')).toBeLessThan(0); // Kkakdugi com 16 pontos é desperdício
+    expect(gainOf('chance')).toBeLessThan(0); // Chance com 16 pontos é desperdício
     expect(mediumDecide(state, 'npc', noRandom).category).not.toBe('yar');
     expect(mediumDecide(state, 'npc', noRandom).category).not.toBe('chance');
   });
@@ -193,7 +193,7 @@ describe('comportamento', () => {
     expect(picks.size).toBeGreaterThan(1);
   });
 
-  it('Médio busca a sequência: com 1-2-3-4 tranca os 4 e tenta a Corda', () => {
+  it('Médio busca a sequência: com 1-2-3-4 tranca os 4 e tenta a Sequência Maior', () => {
     const state = stateWithHand([1, 2, 3, 4, 4]);
     expect(mediumDecide(state, 'npc', noRandom)).toEqual({
       type: 'draw',
@@ -250,7 +250,7 @@ describe('lookahead', () => {
     }
   });
 
-  it('modelo de dados: Yar! com 3 tiradas ≈ 2,30 e Kkakdugi ≈ 23,33 (valores conhecidos)', () => {
+  it('modelo de dados: Yar! com 3 tiradas ≈ 2,30 e Chance ≈ 23,33 (valores conhecidos)', () => {
     expect(keepValue(dice, 0, 'yar', 2)).toBeCloseTo(2.3014, 3);
     expect(keepValue(dice, 0, 'chance', 2)).toBeCloseTo(23.333, 2);
   });

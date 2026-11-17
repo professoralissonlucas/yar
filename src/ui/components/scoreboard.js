@@ -1,9 +1,11 @@
 import { getCurrentPlayer, getScoreOptions, getTotals } from '../../core/game.js';
 import { faceStyle, getCharacter } from '../characters.js';
 import { h } from '../dom.js';
-import { categoryName, categoryTooltip, initialOf } from '../texts.js';
+import { categoryDescription, categoryName, initialOf } from '../texts.js';
 
 const FACE_PX = 32;
+
+let renderCount = 0;
 
 /** Selo do jogador no cabeçalho: rosto do personagem ou inicial num círculo. */
 export function seatBadge(seat, name) {
@@ -24,6 +26,11 @@ export function seatBadge(seat, name) {
  *   pontos (getScoreOptions) e chamam onScore(categoryId) ao clicar.
  * - `showPreview`: mostra a prévia só para leitura (vez do NPC).
  * - `highlight`: categoria do jogador da vez a destacar (escolha do NPC).
+ * - `handPoints`: pontos da mão atual por categoria (dica "Sua mão agora"), ou null.
+ *
+ * O nome de cada categoria é um botão com a dica (components/categoryTip.js);
+ * o texto da dica para leitores de tela fica fora da tabela, escondido, e é
+ * ligado ao botão por aria-describedby. Devolve um fragmento: tabela + textos.
  */
 export function renderScoreboard({
   state,
@@ -31,8 +38,10 @@ export function renderScoreboard({
   interactive = false,
   showPreview = false,
   highlight = null,
+  handPoints = null,
   onScore,
 }) {
+  const idPrefix = `cat-desc-${++renderCount}`;
   const playing = state.status === 'playing';
   const current = getCurrentPlayer(state);
   const options = interactive || showPreview ? getScoreOptions(state) : {};
@@ -103,9 +112,10 @@ export function renderScoreboard({
     return h('td', { class: classes.filter(Boolean).join(' ') });
   };
 
-  return h(
+  const table = h(
     'table',
-    { class: 'scoreboard' },
+    // --rows: categorias + total + cabeçalho (rosto e nome, ~2 linhas) + folga
+    { class: 'scoreboard', style: { '--rows': String(state.categories.length + 4) } },
     h(
       'thead',
       {},
@@ -120,8 +130,18 @@ export function renderScoreboard({
           {},
           h(
             'th',
-            { scope: 'row', class: 'scoreboard__cat', title: categoryTooltip(categoryId) },
-            categoryName(categoryId),
+            { scope: 'row', class: 'scoreboard__cat' },
+            h(
+              'button',
+              {
+                type: 'button',
+                class: 'cat-name',
+                'aria-describedby': `${idPrefix}-${categoryId}`,
+                dataset: { catTip: categoryId, focusKey: `cat-${categoryId}` },
+              },
+              h('span', { class: 'cat-name__text' }, categoryName(categoryId)),
+              h('span', { class: 'cat-name__info', 'aria-hidden': 'true' }, 'i'),
+            ),
           ),
           state.players.map((p) => cell(p, categoryId)),
         ),
@@ -140,4 +160,19 @@ export function renderScoreboard({
       ),
     ),
   );
+
+  const descriptions = h(
+    'div',
+    { class: 'visually-hidden' },
+    state.categories.map((categoryId) =>
+      h(
+        'span',
+        { id: `${idPrefix}-${categoryId}` },
+        categoryDescription(categoryId, typeof handPoints?.[categoryId] === 'number' ? handPoints[categoryId] : null),
+      ),
+    ),
+  );
+  const fragment = document.createDocumentFragment();
+  fragment.append(table, descriptions);
+  return fragment;
 }

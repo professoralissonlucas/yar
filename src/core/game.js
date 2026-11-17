@@ -186,7 +186,7 @@ export function scoreTurn(state, categoryId) {
 /**
  * Categoria marcada automaticamente quando o tempo acaba: a vazia de maior
  * pontuação; em empate (inclusive quando todas dão 0), a de menor potencial,
- * isto é, a primeira na ordem de CATEGORIES (Fragmento Um, Dois Pacotes, …).
+ * isto é, a primeira na ordem de CATEGORIES (Uns, Dois, …).
  */
 export function chooseTimeoutCategory(state) {
   const options = getScoreOptions(state);

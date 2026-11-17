@@ -5,21 +5,21 @@
  */
 
 export const CATEGORIES = [
-  { id: 'ones', name: 'Fragmento Um', min: 0, max: 5 },
-  { id: 'twos', name: 'Dois Pacotes', min: 0, max: 10 },
-  { id: 'threes', name: 'Três Pacotes', min: 0, max: 15 },
-  { id: 'fours', name: 'Quatro Motivos', min: 0, max: 20 },
-  { id: 'fives', name: 'Cinco Caroços', min: 0, max: 25 },
-  { id: 'sixes', name: 'Seis Buquês', min: 0, max: 30 },
-  { id: 'pair', name: 'Parceiro', min: 0, max: 12 },
-  { id: 'three_kind', name: 'Pico', min: 0, max: 18 },
-  { id: 'four_kind', name: 'Garra de Dragão', min: 0, max: 24 },
-  { id: 'two_pair', name: 'Rude', min: 0, max: 15 },
-  { id: 'full_house', name: 'Sedução do Lobo', min: 0, max: 25 },
+  { id: 'ones', name: 'Uns', min: 0, max: 5 },
+  { id: 'twos', name: 'Dois', min: 0, max: 10 },
+  { id: 'threes', name: 'Três', min: 0, max: 15 },
+  { id: 'fours', name: 'Quatros', min: 0, max: 20 },
+  { id: 'fives', name: 'Cincos', min: 0, max: 25 },
+  { id: 'sixes', name: 'Seis', min: 0, max: 30 },
+  { id: 'pair', name: 'Par', min: 0, max: 12 },
+  { id: 'three_kind', name: 'Trinca', min: 0, max: 18 },
+  { id: 'four_kind', name: 'Quadra', min: 0, max: 24 },
+  { id: 'two_pair', name: 'Dois Pares', min: 0, max: 15 },
+  { id: 'full_house', name: 'Full House', min: 0, max: 25 },
   { id: 'yar', name: 'Yar!', min: 0, max: 50 },
-  { id: 'small_straight', name: 'Estrada Bifurcada', min: 0, max: 30 },
-  { id: 'large_straight', name: 'Corda', min: 0, max: 40 },
-  { id: 'chance', name: 'Kkakdugi', min: 5, max: 30 },
+  { id: 'small_straight', name: 'Sequência Menor', min: 0, max: 30 },
+  { id: 'large_straight', name: 'Sequência Maior', min: 0, max: 40 },
+  { id: 'chance', name: 'Chance', min: 5, max: 30 },
 ];
 
 export const CATEGORY_IDS = CATEGORIES.map((c) => c.id);
@@ -41,7 +41,7 @@ export const FIXED_SCORES = {
   large_straight: 40,
 };
 
-/** Sequências que valem Estrada Bifurcada / Corda (a ordem das cartas não importa). */
+/** Sequências que valem Sequência Menor / Maior (a ordem das cartas não importa). */
 export const SMALL_STRAIGHTS = [
   [1, 2, 3, 4],
   [2, 3, 4, 5],

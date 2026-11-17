@@ -21,7 +21,7 @@ const STOP_GAIN = 8;
 
 /**
  * Custo extra de gastar estas categorias no começo da partida (diminui até 0
- * conforme a tabela enche): o Médio evita usar Yar! e Kkakdugi cedo.
+ * conforme a tabela enche): o Médio evita usar Yar! e Chance cedo.
  */
 export const EARLY_PROTECTION = { yar: 4, chance: 3 };
 
@@ -44,7 +44,7 @@ function straightLocks(hand, counts, empty) {
   let best = null;
   for (const window of windows) {
     const hits = window.filter((v) => counts[v] > 0);
-    // prefere mais acertos; em empate, a janela maior (Corda)
+    // prefere mais acertos; em empate, a janela maior (Sequência Maior)
     if (!best || hits.length > best.hits.length || (hits.length === best.hits.length && window.length > best.size)) {
       best = { hits, size: window.length };
     }

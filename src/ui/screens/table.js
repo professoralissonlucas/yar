@@ -23,6 +23,7 @@ import {
 } from '../characters.js';
 import { createAvatar } from '../components/avatar.js';
 import { renderCard, renderCardBack } from '../components/card.js';
+import { attachCategoryTips } from '../components/categoryTip.js';
 import { closeDialogs, confirmDialog, showTurnNotice } from '../components/dialog.js';
 import { renderScoreboard } from '../components/scoreboard.js';
 import { createTurnTimer, formatSeconds } from '../components/turnTimer.js';
@@ -75,21 +76,33 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
 
   // Esqueleto persistente: só o conteúdo dos painéis é redesenhado, então o
   // avatar nunca sai do DOM (o fade e as animações não reiniciam a cada clique).
+  // Layout (styles.css / character.css): no desktop, tabela | cartas | professor
+  // em 100dvh; no celular, a tabela rola e o "dock" (professor, cartas e
+  // botões) fica fixo embaixo. No desktop o dock é display: contents.
   const headerEl = h('header', { class: 'table-header' });
   const scorePanel = h('section', { class: 'panel score-panel', 'aria-label': 'Tabela de pontuação' });
   const playArea = h('section', { class: 'panel play-area', 'aria-label': 'Mesa' });
   const topSeatEl = renderSeat(topSeat, 'top');
   const bottomSeatEl = renderSeat(bottomSeat, 'bottom');
-  root.replaceChildren(
+  const screenEl = h(
+    'div',
+    { class: 'screen table-screen' },
+    headerEl,
     h(
       'div',
-      { class: 'screen table-screen' },
-      headerEl,
-      h('div', { class: 'table-layout' }, scorePanel, topSeatEl, playArea, bottomSeatEl),
+      { class: `table-layout${avatarSeat ? ' table-layout--character' : ''}` },
+      scorePanel,
+      h('div', { class: 'table-dock' }, topSeatEl, playArea, bottomSeatEl),
     ),
   );
+  // dica das categorias: nunca cobre as cartas; na vez do jogador mostra a mão
+  const tips = attachCategoryTips(screenEl, {
+    getHandPoints: () => currentHandPoints(),
+    avoid: () => [playArea.querySelector('.hand')],
+  });
+  root.replaceChildren(screenEl);
 
-  /** Assento: personagem (figura + balão ao lado) ou só o nome. */
+  /** Assento: personagem (nome em cima; figura e balão ao lado da cabeça) ou só o nome. */
   function renderSeat(seat, side) {
     const label = h(
       'div',
@@ -105,8 +118,9 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
       return h(
         'section',
         { class: `seat seat--${side} seat--character`, 'aria-label': seat.name },
+        label,
         h('div', { class: 'seat__avatar' }, avatar.figure),
-        h('div', { class: 'seat__side' }, label, avatar.speech),
+        avatar.speech,
       );
     }
     return h('section', { class: `seat seat--${side}`, 'aria-label': seat.name }, label);
@@ -130,6 +144,8 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
   const isLocalTurn = () => currentSeat()?.controller === 'local';
   const isNpcTurn = () => currentSeat()?.controller === 'npc';
   const canAct = () => !busy && !destroyed && state.status === 'playing' && isLocalTurn();
+  /** Pontos da mão atual nas categorias vazias (dica "Sua mão agora"), só na vez do jogador. */
+  const currentHandPoints = () => (canAct() && state.turn.drawsUsed > 0 ? getScoreOptions(state) : null);
 
   // ---------- ações ----------
 
@@ -303,6 +319,7 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
     destroyed = true;
     timer?.stop();
     avatar?.destroy();
+    tips.destroy();
     closeDialogs();
   }
 
@@ -388,6 +405,12 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
           h('span', { class: 'turn-info__label' }, 'Vez de'),
           h('strong', { class: 'turn-info__name' }, current.name),
           h('span', { class: 'turn-info__round' }, `Turno ${turnNumber}/${totalTurns}`),
+          h(
+            'span',
+            { class: 'turn-info__mode' },
+            `${mode.name} `,
+            h('span', { class: 'stars', 'aria-label': `${mode.stars} de 5 estrelas` }, stars(mode.stars)),
+          ),
         ),
         timer &&
           !isNpcTurn() &&
@@ -407,12 +430,12 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
         interactive: canAct(),
         showPreview: !busy && isNpcTurn(),
         highlight: npcPick,
+        handPoints: currentHandPoints(),
         onScore,
       }),
     );
 
     playArea.replaceChildren(
-      h('p', { class: 'mode-label' }, `${mode.name} `, h('span', { class: 'stars' }, stars(mode.stars))),
       h('div', { class: 'hand' }, renderHand()),
       h('p', { class: 'hint', 'aria-live': 'polite' }, hintText()),
       h(
@@ -430,6 +453,7 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
 
     dealtIndices = new Set(); // a animação só roda uma vez
     if (focusKey) root.querySelector(`[data-focus-key="${focusKey}"]`)?.focus();
+    tips.refresh(); // a dica aberta acompanha a tabela nova (e a mão nova)
   }
 
   window.scrollTo(0, 0);

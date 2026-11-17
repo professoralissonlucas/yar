@@ -131,7 +131,7 @@
   align-items: center;
   gap: var(--space-2);
   min-width: 0;
-  padding: 12px var(--space-2);
+  padding: clamp(6px, 1.2vh, 12px) var(--space-2);
   border: 2px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface);
@@ -176,93 +176,163 @@
   display: inline-block;
 }
 
-/* assento com personagem: figura grande + coluna com nome e balão */
+/*
+ * Assento com personagem: nome em cima; embaixo, a figura e o balão ao lado
+ * da cabeça. A largura da coluna (container) e a altura da janela definem o
+ * tamanho do professor.
+ */
 .seat--character {
-  align-items: flex-start;
+  container-type: inline-size;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    'label label'
+    'figure speech';
+  align-content: start;
+  align-items: start;
+  gap: var(--space-1) 12px;
   padding: var(--space-2);
 }
 
-.seat__avatar {
-  flex: 0 0 auto;
+.seat--character > .seat__label {
+  grid-area: label;
 }
 
-.seat__side {
-  display: grid;
-  align-content: start;
-  gap: var(--space-2);
-  min-width: 0;
-  padding-top: var(--space-1);
+.seat--character > .seat__avatar {
+  grid-area: figure;
+}
+
+.seat--character > .avatar__speech {
+  grid-area: speech;
+  max-width: none;
+  margin-top: 12px;
+  font-size: clamp(0.8rem, 4.4cqi, 1rem);
+}
+
+.seat--character .avatar {
+  --avatar-h: min(76cqi, calc(100vh - 210px), 460px);
+  --avatar-h: min(76cqi, calc(100dvh - 210px), 460px);
 }
 
 /* ---------- layout da mesa ---------- */
 
-/* Desktop: tabela à esquerda; à direita adversário / cartas / jogador. */
 .table-layout {
   display: grid;
-  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
-  grid-template-areas:
-    'score top'
-    'score play'
-    'score bottom';
-  grid-template-rows: auto auto 1fr;
-  gap: var(--space-2);
-  align-items: start;
+  min-height: 0;
+  gap: var(--table-gap, var(--space-2));
 }
 
-.table-layout > .score-panel {
-  grid-area: score;
-}
+/*
+ * Desktop: cabe em 100dvh, sem rolagem.
+ * 2 jogadores: tabela | adversário / cartas / jogador.
+ * Contra a máquina: tabela | cartas (jogador embaixo) | professor.
+ * As áreas ficam só aqui: no celular o dock é um grid próprio, e um nome de
+ * área inexistente criaria colunas implícitas.
+ */
+@media (min-width: 1000px) {
+  /* os filhos do dock entram direto no grid da mesa */
+  .table-dock {
+    display: contents;
+  }
 
-.table-layout > .seat--top {
-  grid-area: top;
-}
+  .table-layout > .score-panel {
+    grid-area: score;
+  }
 
-.table-layout > .play-area {
-  grid-area: play;
-}
+  .table-dock > .seat--top {
+    grid-area: top;
+  }
 
-.table-layout > .seat--bottom {
-  grid-area: bottom;
-}
+  .table-dock > .play-area {
+    grid-area: play;
+  }
 
-/* Celular: adversário → tabela → cartas → jogador. */
-@media (max-width: 760px) {
+  .table-dock > .seat--bottom {
+    grid-area: bottom;
+  }
+
   .table-layout {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: clamp(280px, 25vw, 380px) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
     grid-template-areas:
-      'top'
-      'score'
-      'play'
-      'bottom';
-    grid-template-rows: none;
+      'score top'
+      'score play'
+      'score bottom';
+  }
+
+  .table-layout--character {
+    grid-template-columns: clamp(280px, 25vw, 380px) minmax(0, 1fr) clamp(280px, 28vw, 520px);
+    grid-template-rows: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'score play top'
+      'score bottom top';
+  }
+}
+
+/*
+ * Celular / janela estreita: só a tabela rola; o dock (professor pequeno,
+ * cartas e botões) fica sempre visível embaixo.
+ */
+@media (max-width: 999.98px) {
+  .table-layout {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
     gap: var(--space-1);
+  }
+
+  .table-layout > .score-panel {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .table-dock {
+    display: grid;
+    flex: none;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  /* sem personagem, o cabeçalho já diz de quem é a vez */
+  .table-dock > .seat:not(.seat--character) {
+    display: none;
   }
 
   .seat--character {
-    padding: 12px;
+    container-type: normal;
+    grid-template-rows: auto auto;
+    grid-template-areas:
+      'figure label'
+      'figure speech';
+    gap: 2px 10px;
+    padding: 6px 10px;
   }
 
   .seat--character .avatar {
-    --avatar-h: 110px;
+    --avatar-h: 64px;
   }
 
-  .seat--character .seat__side {
-    gap: var(--space-1);
-    padding-top: 0;
-  }
-
-  .seat--character .avatar__speech {
-    max-width: none;
-    padding: var(--space-1) 12px;
+  .seat--character > .avatar__speech {
+    margin-top: 0;
+    padding: 4px 10px;
     font-size: var(--fs-small);
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
+    line-height: 1.3;
   }
 
-  .seat--character .avatar__speech::after {
-    top: 10px;
+  /* 2 linhas no máximo (o corte fica no texto para não cortar o rabinho) */
+  .seat--character .avatar__speech-text {
+    display: -webkit-box;
+    min-height: 2.6em;
+    overflow: hidden;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+  }
+
+  .seat--character > .avatar__speech::after {
+    top: 8px;
   }
 
   .seat__name {

@@ -42,7 +42,7 @@ tests/
 3. Clica em **"Tirar cartas"** de novo para trocar as não trancadas. O total de tiradas por turno é **3 ou 4**, conforme o modo (botão mostra `Tirar cartas (1/3)`).
 4. A qualquer momento depois da 1ª tirada, o jogador escolhe **uma categoria ainda vazia** na tabela para marcar os pontos da mão atual. Isso encerra o turno.
 5. Se nenhuma categoria pontuar, ele **é obrigado a zerar** uma categoria vazia.
-6. **Timer opcional de 45 s** por turno (ligável nas opções). Se acabar: marca automaticamente a categoria vazia de maior pontuação; se todas dariam 0, zera a de menor potencial (ordem: Fragmento Um, Dois Pacotes, …).
+6. **Timer opcional de 45 s** por turno (ligável nas opções). Se acabar: marca automaticamente a categoria vazia de maior pontuação; se todas dariam 0, zera a de menor potencial (ordem: Uns, Dois, …).
 
 ### Partida
 - Os jogadores alternam turnos. Cada categoria só pode ser marcada **uma vez por jogador**.
@@ -50,27 +50,34 @@ tests/
 - A partida termina quando todos preencherem todas as categorias. **Vence quem somar mais pontos**; empate é possível.
 - Sem bônus de seção superior (diferente do Yahtzee clássico).
 
-### Categorias (nomes da versão PT-BR do BDO)
+### Categorias (nomes convencionais do Yahtzee em português)
 
 | id | Nome | Pontuação | Regra |
 |---|---|---|---|
-| `ones` | Fragmento Um | 0–5 | Soma das cartas 1 |
-| `twos` | Dois Pacotes | 0–10 | Soma das cartas 2 |
-| `threes` | Três Pacotes | 0–15 | Soma das cartas 3 |
-| `fours` | Quatro Motivos | 0–20 | Soma das cartas 4 |
-| `fives` | Cinco Caroços | 0–25 | Soma das cartas 5 |
-| `sixes` | Seis Buquês | 0–30 | Soma das cartas 6 |
-| `pair` | Parceiro | 0–12 | Pelo menos 2 iguais → soma **só do par de maior valor** (6,6,x,x,x = 12) |
-| `three_kind` | Pico | 0–18 | Pelo menos 3 iguais → soma **só dessas 3** |
-| `four_kind` | Garra de Dragão | 0–24 | Pelo menos 4 iguais → soma **só dessas 4** |
-| `two_pair` | Rude | 0 ou 15 | Dois pares de **valores diferentes** (vale também com full house: 3,3,3,5,5). Quadra sozinha não conta |
-| `full_house` | Sedução do Lobo | 0 ou 25 | Exatamente 3 de um valor + 2 de **outro** valor. Cinco iguais não contam |
+| `ones` | Uns | 0–5 | Soma das cartas 1 |
+| `twos` | Dois | 0–10 | Soma das cartas 2 |
+| `threes` | Três | 0–15 | Soma das cartas 3 |
+| `fours` | Quatros | 0–20 | Soma das cartas 4 |
+| `fives` | Cincos | 0–25 | Soma das cartas 5 |
+| `sixes` | Seis | 0–30 | Soma das cartas 6 |
+| `pair` | Par | 0–12 | Pelo menos 2 iguais → soma **só do par de maior valor** (6,6,x,x,x = 12) |
+| `three_kind` | Trinca | 0–18 | Pelo menos 3 iguais → soma **só dessas 3** |
+| `four_kind` | Quadra | 0–24 | Pelo menos 4 iguais → soma **só dessas 4** |
+| `two_pair` | Dois Pares | 0 ou 15 | Dois pares de **valores diferentes** (vale também com full house: 3,3,3,5,5). Quadra sozinha não conta |
+| `full_house` | Full House | 0 ou 25 | Exatamente 3 de um valor + 2 de **outro** valor. Cinco iguais não contam |
 | `yar` | Yar! | 0 ou 50 | 5 cartas iguais |
-| `small_straight` | Estrada Bifurcada | 0 ou 30 | 4 valores em sequência (1-2-3-4, 2-3-4-5 ou 3-4-5-6), ordem não importa |
-| `large_straight` | Corda | 0 ou 40 | 5 valores em sequência (1-2-3-4-5 ou 2-3-4-5-6), ordem não importa |
-| `chance` | Kkakdugi | 5–30 | Soma de todas as 5 cartas |
+| `small_straight` | Sequência Menor | 0 ou 30 | 4 valores em sequência (1-2-3-4, 2-3-4-5 ou 3-4-5-6), ordem não importa |
+| `large_straight` | Sequência Maior | 0 ou 40 | 5 valores em sequência (1-2-3-4-5 ou 2-3-4-5-6), ordem não importa |
+| `chance` | Chance | 5–30 | Soma de todas as 5 cartas |
 
-Observação: a fonte em inglês lista Garra de Dragão como 0–20, mas o máximo real (quatro 6) é 24 — usar 24.
+Observação: a fonte em inglês lista a Quadra como 0–20, mas o máximo real (quatro 6) é 24 — usar 24.
+
+Na tabela, cada nome tem um ícone "i" com uma **dica própria** (sem `title`): abre ao passar o mouse, ao tocar (toca de novo ou fora para fechar) e ao focar com Tab (`aria-describedby`). Mostra regra, pontuação, exemplo com mini-cartas e, na vez do jogador, "Sua mão agora: X pontos". Nunca sai da tela nem cobre as cartas. Textos em `CATEGORY_HELP` (`src/ui/texts.js`).
+
+### Mesa (layout)
+- Desktop (≥ 1000 px): a mesa ocupa **100dvh sem rolagem**, mesmo no modo Completo: cabeçalho de 1 linha e, abaixo, tabela | cartas e botões | professor. Linhas da tabela, cartas e professor encolhem pela altura da janela (clamp com vh). Precisa caber em 1280×620, 1366×657, 1536×730 e 1920×969.
+- Celular: só a tabela rola; cartas, botão "Tirar cartas" e o professor (pequeno) ficam fixos embaixo.
+- Conferência: `npm run screenshots` (lista rolagem e posição da dica por tamanho).
 
 ### Modos de jogo (inspirados nos modos PvP do Yar)
 
@@ -102,10 +109,10 @@ A máquina é **o Prof. Alishow** (personagem com poses, frases e reações em `
 Todos os níveis usam a mesma interface (`src/ai/`): `decideAction(state, playerId, rng)` → `{ type: 'draw', locks: [5 booleanos] }` ou `{ type: 'score', category }`. As jogadas da máquina aparecem na tela com pequenas pausas (~700 ms) para o jogador acompanhar. Valores esperados por categoria: `src/ai/expectedValues.js`, gerado por `npm run calibrate`; comparação entre níveis: `npm run tournament`.
 
 1. **Fácil (Bonzinho)**: tranca as cartas do valor que mais se repete; para de tirar se já tiver algo bom por acaso; marca a categoria que dá **mais pontos agora** (guloso). 20% de chance de uma escolha aleatória.
-2. **Médio (Exigente)**: heurísticas por objetivo (busca trinca/quadra, sequência quando tem 3-4 em sequência, full house quando tem dois pares). Escolhe a categoria comparando os pontos com a **média esperada** daquela categoria (evita gastar Kkakdugi ou Yar! cedo, prefere zerar categorias de baixo valor como Fragmento Um).
-3. **Difícil (Banca de Prova)**: para cada uma das 32 combinações de trancar/não trancar, simula N tiradas (Monte Carlo, ~200 por combinação, respeitando as cartas restantes no baralho) e escolhe a de **maior valor esperado** considerando só as categorias ainda vazias, com pesos que valorizam categorias raras (Yar!, Corda). Na escolha de categoria usa a mesma lógica do Médio com tabela de valores esperados calibrada por simulação.
+2. **Médio (Exigente)**: heurísticas por objetivo (busca trinca/quadra, sequência quando tem 3-4 em sequência, full house quando tem dois pares). Escolhe a categoria comparando os pontos com a **média esperada** daquela categoria (evita gastar Chance ou Yar! cedo, prefere zerar categorias de baixo valor como Uns).
+3. **Difícil (Banca de Prova)**: para cada uma das 32 combinações de trancar/não trancar, simula N tiradas (Monte Carlo, ~200 por combinação, respeitando as cartas restantes no baralho) e escolhe a de **maior valor esperado** considerando só as categorias ainda vazias, com pesos que valorizam categorias raras (Yar!, Sequência Maior). Na escolha de categoria usa a mesma lógica do Médio com tabela de valores esperados calibrada por simulação.
 
-Reações do professor (do ponto de vista dele): pensa na vez dele; fica feliz/empolgado/irritado com as próprias jogadas; fica surpreso quando o jogador marca 25+ ou faz Yar!; provoca quando o jogador zera; vitória/derrota/empate no fim. Na mesa ele fica do lado do adversário, grande, com o balão ao lado da cabeça; o jogador aparece só com o nome.
+Reações do professor (do ponto de vista dele): pensa na vez dele; fica feliz/empolgado/irritado com as próprias jogadas; fica surpreso quando o jogador marca 25+ ou faz Yar!; provoca quando o jogador zera; vitória/derrota/empate no fim. Na mesa ele fica na coluna da direita (lado do adversário), grande, com o balão ao lado da cabeça; o jogador aparece só com o nome.
 
 ---
 
