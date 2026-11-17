@@ -4,13 +4,15 @@ import { categoryName, categoryTooltip } from '../texts.js';
 
 /**
  * Tabela de pontuação: uma linha por categoria do modo, uma coluna por jogador.
- * Com `interactive`, as células vazias do jogador da vez mostram a prévia dos
- * pontos (vinda de getScoreOptions) e chamam onScore(categoryId) ao clicar.
+ * - `interactive`: as células vazias do jogador da vez mostram a prévia dos
+ *   pontos (getScoreOptions) e chamam onScore(categoryId) ao clicar.
+ * - `showPreview`: mostra a prévia só para leitura (vez do NPC).
+ * - `highlight`: categoria do jogador da vez a destacar (escolha do NPC).
  */
-export function renderScoreboard({ state, interactive = false, onScore }) {
+export function renderScoreboard({ state, interactive = false, showPreview = false, highlight = null, onScore }) {
   const playing = state.status === 'playing';
   const current = getCurrentPlayer(state);
-  const options = interactive ? getScoreOptions(state) : {};
+  const options = interactive || showPreview ? getScoreOptions(state) : {};
   const totals = getTotals(state);
   const last = state.lastScored;
 
@@ -34,6 +36,18 @@ export function renderScoreboard({ state, interactive = false, onScore }) {
 
     if (isCurrent && categoryId in options) {
       const points = options[categoryId];
+      if (!interactive) {
+        const picked = highlight === categoryId;
+        return h(
+          'td',
+          { class: [...classes, picked && 'cell--npc-pick'].filter(Boolean).join(' ') },
+          h(
+            'span',
+            { class: `preview preview--readonly${points === 0 ? ' preview--zero' : ''}` },
+            points,
+          ),
+        );
+      }
       return h(
         'td',
         { class: classes.filter(Boolean).join(' ') },

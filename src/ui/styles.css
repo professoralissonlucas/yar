@@ -274,6 +274,24 @@ input {
   letter-spacing: 0.5px;
 }
 
+.npc-row {
+  margin-top: 12px;
+}
+
+.form-note {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.switch__note {
+  color: var(--muted);
+}
+
+[hidden] {
+  display: none !important;
+}
+
 .mode-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -569,6 +587,42 @@ tbody .scoreboard__cat {
   border-color: var(--danger);
   background: rgba(217, 87, 77, 0.15);
   color: #f1b0aa;
+}
+
+/* Prévia só para leitura (vez do NPC) */
+.preview--readonly {
+  display: inline-block;
+  cursor: default;
+  opacity: 0.7;
+}
+
+.preview--readonly:hover {
+  border-style: dashed;
+  background: rgba(166, 227, 194, 0.08);
+}
+
+.preview--readonly.preview--zero:hover {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: transparent;
+  color: var(--preview-zero);
+}
+
+/* Célula que o NPC escolheu, antes de marcar */
+.cell--npc-pick .preview {
+  border: 2px solid var(--gold);
+  background: rgba(229, 185, 78, 0.3);
+  color: var(--text);
+  opacity: 1;
+  animation: npc-pick 0.7s ease-in-out infinite alternate;
+}
+
+@keyframes npc-pick {
+  from {
+    transform: scale(1);
+  }
+  to {
+    transform: scale(1.12);
+  }
 }
 
 /* ---------- diálogos e aviso de vez ---------- */

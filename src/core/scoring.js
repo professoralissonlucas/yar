@@ -41,15 +41,26 @@ export const FIXED_SCORES = {
   large_straight: 40,
 };
 
-const SMALL_STRAIGHTS = [
+/** Sequências que valem Estrada Bifurcada / Corda (a ordem das cartas não importa). */
+export const SMALL_STRAIGHTS = [
   [1, 2, 3, 4],
   [2, 3, 4, 5],
   [3, 4, 5, 6],
 ];
-const LARGE_STRAIGHTS = [
+export const LARGE_STRAIGHTS = [
   [1, 2, 3, 4, 5],
   [2, 3, 4, 5, 6],
 ];
+
+/** Categoria da seção de números correspondente a cada valor de carta. */
+export const NUMBER_CATEGORY_BY_VALUE = {
+  1: 'ones',
+  2: 'twos',
+  3: 'threes',
+  4: 'fours',
+  5: 'fives',
+  6: 'sixes',
+};
 
 function validateHand(cards) {
   if (!Array.isArray(cards) || cards.length !== 5) {

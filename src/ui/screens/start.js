@@ -1,34 +1,61 @@
+import { NPCS } from '../../ai/index.js';
 import { MODES } from '../../core/modes.js';
+import { getCharacter } from '../characters.js';
 import { h } from '../dom.js';
-import { categoryName, categoryTooltip, pluralize, stars } from '../texts.js';
+import { NPC_DESCRIPTIONS, categoryName, categoryTooltip, pluralize, stars } from '../texts.js';
 
 export const NAME_MAX_LENGTH = 16;
 export const DEFAULT_NAMES = ['Jogador 1', 'Jogador 2'];
+export const DEFAULT_PLAYER_NAME = 'Você';
 
 /** Tipos de partida. Os desabilitados aparecem como "em breve". */
 const MATCH_TYPES = [
   { id: 'local', label: '2 jogadores', detail: 'no mesmo computador', enabled: true },
-  { id: 'ai', label: 'Contra a máquina', detail: 'Igor, Eileen ou Islin', enabled: false },
+  {
+    id: 'npc',
+    label: 'Contra a máquina',
+    detail: 'Igor, Eileen ou Islin',
+    enabled: true,
+    character: 'alishow', // você joga como o Prof. Alishow
+  },
   { id: 'online', label: 'Online', detail: 'contra um amigo', enabled: false },
 ];
 
+function cleanName(value, fallback) {
+  return String(value ?? '').trim().slice(0, NAME_MAX_LENGTH) || fallback;
+}
+
 /**
  * Tela de início.
- * onPlay({ matchType, names: [string, string], modeId, timerEnabled })
+ * onPlay({ matchType: 'local' | 'npc', names, playerName, npcLevel, modeId, timerEnabled })
  */
 export function showStart(root, { initial, onPlay }) {
   const names = initial.names ?? DEFAULT_NAMES;
+  const initialType = MATCH_TYPES.some((t) => t.id === initial.matchType && t.enabled)
+    ? initial.matchType
+    : 'local';
+
+  const characterThumb = (id) => {
+    const character = getCharacter(id);
+    return h(
+      'span',
+      { class: 'choice__character' },
+      h('img', { src: character.images.neutral, alt: '', draggable: 'false' }),
+      h('span', { class: 'choice__character-name' }, `Você é o ${character.name}`),
+    );
+  };
 
   const matchTypeOption = (type) =>
     h(
       'label',
-      { class: `choice${type.enabled ? '' : ' choice--disabled'}` },
+      { class: `choice${type.enabled ? '' : ' choice--disabled'}${type.character ? ' choice--with-character' : ''}` },
       h('input', {
         type: 'radio',
         name: 'matchType',
         value: type.id,
-        checked: type.id === 'local',
+        checked: type.id === initialType,
         disabled: !type.enabled,
+        onChange: updateVisibleSections,
       }),
       h(
         'span',
@@ -36,23 +63,46 @@ export function showStart(root, { initial, onPlay }) {
         h('span', { class: 'choice__title' }, type.label),
         h('span', { class: 'choice__detail' }, type.detail),
         !type.enabled && h('span', { class: 'badge' }, 'em breve'),
+        type.character && characterThumb(type.character),
       ),
     );
 
-  const nameField = (index) =>
+  const textField = (label, name, value, placeholder) =>
     h(
       'label',
       { class: 'field' },
-      h('span', { class: 'field__label' }, `Jogador ${index + 1}`),
+      h('span', { class: 'field__label' }, label),
       h('input', {
         type: 'text',
-        name: `name${index}`,
-        value: names[index] ?? DEFAULT_NAMES[index],
+        name,
+        value,
         maxlength: NAME_MAX_LENGTH,
         autocomplete: 'off',
-        placeholder: DEFAULT_NAMES[index],
-        required: false,
+        placeholder,
       }),
+    );
+
+  const npcOption = (npc) =>
+    h(
+      'label',
+      { class: 'choice npc-option' },
+      h('input', {
+        type: 'radio',
+        name: 'npcLevel',
+        value: npc.id,
+        checked: npc.id === (initial.npcLevel ?? 'easy'),
+      }),
+      h(
+        'span',
+        { class: 'choice__body' },
+        h(
+          'span',
+          { class: 'mode-option__head' },
+          h('span', { class: 'choice__title' }, npc.name),
+          h('span', { class: 'badge' }, npc.label),
+        ),
+        h('span', { class: 'choice__detail' }, NPC_DESCRIPTIONS[npc.id]),
+      ),
     );
 
   const modeOption = (mode) =>
@@ -93,9 +143,26 @@ export function showStart(root, { initial, onPlay }) {
     ),
     h(
       'fieldset',
-      { class: 'panel' },
+      { class: 'panel', dataset: { matchType: 'local' } },
       h('legend', {}, 'Jogadores'),
-      h('div', { class: 'field-row' }, nameField(0), nameField(1)),
+      h(
+        'div',
+        { class: 'field-row' },
+        textField('Jogador 1', 'name0', names[0] ?? DEFAULT_NAMES[0], DEFAULT_NAMES[0]),
+        textField('Jogador 2', 'name1', names[1] ?? DEFAULT_NAMES[1], DEFAULT_NAMES[1]),
+      ),
+    ),
+    h(
+      'fieldset',
+      { class: 'panel', dataset: { matchType: 'npc' } },
+      h('legend', {}, 'Contra a máquina'),
+      h(
+        'div',
+        { class: 'field-row' },
+        textField('Seu nome', 'playerName', initial.playerName ?? '', DEFAULT_PLAYER_NAME),
+      ),
+      h('div', { class: 'choice-row npc-row' }, NPCS.map(npcOption)),
+      h('p', { class: 'form-note' }, 'Quem começa é sorteado.'),
     ),
     h(
       'fieldset',
@@ -112,27 +179,42 @@ export function showStart(root, { initial, onPlay }) {
         { class: 'switch' },
         h('input', { type: 'checkbox', name: 'timer', checked: Boolean(initial.timerEnabled) }),
         h('span', { class: 'switch__track', 'aria-hidden': 'true' }),
-        h('span', {}, 'Timer de 45 s por turno'),
+        h(
+          'span',
+          {},
+          'Timer de 45 s por turno',
+          h('span', { class: 'switch__note', dataset: { matchType: 'npc' } }, ' (só para você)'),
+        ),
       ),
     ),
     h('button', { type: 'submit', class: 'btn btn--primary btn--large' }, 'Jogar'),
   );
 
+  function currentType() {
+    return String(new FormData(form).get('matchType') ?? 'local');
+  }
+
+  function updateVisibleSections() {
+    const type = currentType();
+    for (const el of form.querySelectorAll('[data-match-type]')) {
+      el.hidden = el.dataset.matchType !== type;
+    }
+  }
+
   function handleSubmit(event) {
     event.preventDefault();
     const data = new FormData(form);
-    const chosenNames = [0, 1].map((i) => {
-      const value = String(data.get(`name${i}`) ?? '').trim().slice(0, NAME_MAX_LENGTH);
-      return value || DEFAULT_NAMES[i];
-    });
     onPlay({
-      matchType: String(data.get('matchType') ?? 'local'),
-      names: chosenNames,
+      matchType: currentType(),
+      names: [0, 1].map((i) => cleanName(data.get(`name${i}`), DEFAULT_NAMES[i])),
+      playerName: cleanName(data.get('playerName'), DEFAULT_PLAYER_NAME),
+      npcLevel: String(data.get('npcLevel') ?? 'easy'),
       modeId: String(data.get('mode') ?? MODES[0].id),
       timerEnabled: data.get('timer') === 'on',
     });
   }
 
+  updateVisibleSections();
   root.replaceChildren(
     h(
       'div',

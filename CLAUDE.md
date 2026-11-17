@@ -91,7 +91,7 @@ Os modos ficam num arquivo de dados (`src/core/modes.js`) para serem fáceis de 
 
 ## NPCs (contra a máquina)
 
-Todos usam a mesma interface: `chooseLocks(state)` → quais cartas trancar (ou "parar e marcar"), e `chooseCategory(state)` → qual categoria marcar. Jogadas do NPC aparecem na tela com pequenas pausas (~700 ms) para o jogador acompanhar.
+Todos usam a mesma interface (`src/ai/`): `decideAction(state, playerId, rng)` → `{ type: 'draw', locks: [5 booleanos] }` ou `{ type: 'score', category }`. Jogadas do NPC aparecem na tela com pequenas pausas (~700 ms) para o jogador acompanhar. Valores esperados por categoria: `src/ai/expectedValues.js`, gerado por `npm run calibrate`; comparação entre níveis: `npm run tournament`.
 
 1. **Fácil — "Igor"**: tranca as cartas do valor que mais se repete; para de tirar se já tiver algo bom por acaso; marca a categoria que dá **mais pontos agora** (guloso). 20% de chance de uma escolha aleatória.
 2. **Médio — "Eileen"**: heurísticas por objetivo (busca trinca/quadra, sequência quando tem 3-4 em sequência, full house quando tem dois pares). Escolhe a categoria comparando os pontos com a **média esperada** daquela categoria (evita gastar Kkakdugi ou Yar! cedo, prefere zerar categorias de baixo valor como Fragmento Um).
