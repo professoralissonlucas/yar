@@ -10,9 +10,11 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "calibrate": "node scripts/calibrate.js",
-    "tournament": "node scripts/tournament.js"
+    "tournament": "node scripts/tournament.js",
+    "screenshots": "npm run build && node scripts/screenshots.js"
   },
   "devDependencies": {
+    "playwright": "^1.65.1",
     "vite": "^8.3.8",
     "vitest": "^5.1.0"
   }

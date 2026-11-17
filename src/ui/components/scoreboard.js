@@ -1,15 +1,38 @@
 import { getCurrentPlayer, getScoreOptions, getTotals } from '../../core/game.js';
+import { faceStyle, getCharacter } from '../characters.js';
 import { h } from '../dom.js';
-import { categoryName, categoryTooltip } from '../texts.js';
+import { categoryName, categoryTooltip, initialOf } from '../texts.js';
+
+const FACE_PX = 32;
+
+/** Selo do jogador no cabeçalho: rosto do personagem ou inicial num círculo. */
+export function seatBadge(seat, name) {
+  if (seat?.character) {
+    return h('span', {
+      class: 'seat-face',
+      style: faceStyle(getCharacter(seat.character), FACE_PX),
+      'aria-hidden': 'true',
+    });
+  }
+  return h('span', { class: 'seat-initial', 'aria-hidden': 'true' }, initialOf(name));
+}
 
 /**
  * Tabela de pontuação: uma linha por categoria do modo, uma coluna por jogador.
+ * - `seats`: assentos (para o rosto do personagem / inicial no cabeçalho).
  * - `interactive`: as células vazias do jogador da vez mostram a prévia dos
  *   pontos (getScoreOptions) e chamam onScore(categoryId) ao clicar.
  * - `showPreview`: mostra a prévia só para leitura (vez do NPC).
  * - `highlight`: categoria do jogador da vez a destacar (escolha do NPC).
  */
-export function renderScoreboard({ state, interactive = false, showPreview = false, highlight = null, onScore }) {
+export function renderScoreboard({
+  state,
+  seats = [],
+  interactive = false,
+  showPreview = false,
+  highlight = null,
+  onScore,
+}) {
   const playing = state.status === 'playing';
   const current = getCurrentPlayer(state);
   const options = interactive || showPreview ? getScoreOptions(state) : {};
@@ -20,7 +43,15 @@ export function renderScoreboard({ state, interactive = false, showPreview = fal
     h(
       'th',
       { scope: 'col', class: playing && player.id === current.id ? 'is-current' : null },
-      h('span', { class: 'scoreboard__player', title: player.name }, player.name),
+      h(
+        'span',
+        { class: 'scoreboard__head' },
+        seatBadge(
+          seats.find((s) => s.id === player.id),
+          player.name,
+        ),
+        h('span', { class: 'scoreboard__player', title: player.name }, player.name),
+      ),
     );
 
   const cell = (player, categoryId) => {

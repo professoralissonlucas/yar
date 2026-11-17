@@ -9,9 +9,9 @@ import * as hard from './hard.js';
 import * as medium from './medium.js';
 
 export const NPCS = [
-  { id: 'easy', label: 'Fácil', name: 'Igor', decideAction: easy.decideAction },
-  { id: 'medium', label: 'Médio', name: 'Eileen', decideAction: medium.decideAction },
-  { id: 'hard', label: 'Difícil', name: 'Islin', decideAction: hard.decideAction },
+  { id: 'easy', label: 'Fácil', decideAction: easy.decideAction },
+  { id: 'medium', label: 'Médio', decideAction: medium.decideAction },
+  { id: 'hard', label: 'Difícil', decideAction: hard.decideAction },
 ];
 
 export function getNpc(id) {

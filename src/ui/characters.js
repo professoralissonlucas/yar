@@ -1,11 +1,11 @@
 /**
  * Personagens (avatares). Sistema genérico: cada personagem tem nome, imagens
- * por pose, ajustes de enquadramento e frases. Hoje só o Prof. Alishow (avatar
- * do jogador humano contra a máquina); os NPCs podem ganhar personagens aqui
- * depois, usando o mesmo componente (src/ui/components/avatar.js).
+ * por pose, ajustes de enquadramento, recorte do rosto, frases por reação e
+ * (opcional) níveis. Hoje há um só: o Prof. Alishow, que É a máquina.
  *
- * As regras de quando reagir também ficam aqui (REACTION_RULES) e usam só as
- * funções de pontuação do core.
+ * Reação ≠ pose: uma reação (ex.: 'taunt') escolhe uma pose (ex.: 'happy') e
+ * um conjunto de frases. As regras de quando reagir ficam aqui e usam só as
+ * funções de pontuação do core. Tudo do ponto de vista do DONO do personagem.
  */
 
 import { FIXED_SCORES, getCategory, scoreHand } from '../core/scoring.js';
@@ -30,7 +30,7 @@ export const CHARACTER_TIMING = {
   fadeMs: 150, // troca de pose
 };
 
-/** Quando o personagem reage (do ponto de vista do jogador dono do personagem). */
+/** Quando o personagem reage (do ponto de vista do dono do personagem). */
 export const REACTION_RULES = {
   /** Marcar estas categorias deixa feliz. */
   happyCategories: ['two_pair', 'small_straight'],
@@ -58,38 +58,38 @@ export const ALISHOW = {
   framing: {
     thinking: { scale: 1.5 },
   },
-  /** Frases por pose — edite à vontade. Pose sem frases não mostra balão. */
+  /**
+   * Recorte do rosto na pose neutral (miniatura da tabela), em frações da
+   * imagem: centro (x, y) e lado do quadrado (size, fração da largura).
+   */
+  face: { x: 0.51, y: 0.15, size: 0.3 },
+  /** Modos do professor (um por nível de IA de src/ai/). */
+  levels: {
+    easy: { title: 'Bonzinho', badge: 'Fácil', description: 'Dá umas colher de chá.' },
+    medium: { title: 'Exigente', badge: 'Médio', description: 'Joga com estratégia.' },
+    hard: { title: 'Banca de Prova', badge: 'Difícil', description: 'Calcula cada probabilidade.' },
+  },
+  /** Pose de cada reação que não tem pose com o mesmo nome. */
+  reactionPoses: {
+    taunt: 'happy',
+    tie: 'happy',
+    greeting: 'neutral',
+  },
+  /** Frases por reação — edite à vontade. Reação sem frases não mostra balão. */
   lines: {
     neutral: [],
-    thinking: [
-      'Hmm, vamos ver o que vem aí...',
-      'Calculando as chances...',
-      'Deixa eu fazer as contas...',
-    ],
-    happy: [
-      'Isso é matemática pura!',
-      'Probabilidade a meu favor!',
-      'Anotem isso no caderno.',
-      'Exatamente como na lousa.',
-    ],
-    excited: [
-      'YAR! Nota dez!',
-      'Isso cai na prova!',
-      'Que sequência linda!',
-      'Ponto extra pra mim!',
-    ],
-    annoyed: [
-      'Zero... sem direito a recuperação.',
-      'Isso não estava no plano de aula.',
-      'Vou fingir que isso não aconteceu.',
-    ],
-    surprised: [
-      'Ei! Quem te ensinou isso?',
-      'Opa, alguém estudou!',
-      'Isso não estava na ementa!',
-    ],
-    victory: ['Aula encerrada. Vitória do professor!', 'E é por isso que eu sou o professor.'],
-    defeat: ['Hoje vocês me pegaram. Revanche na próxima aula!', 'Vou rever minhas anotações...'],
+    thinking: ['Deixa eu fazer as contas...', 'Calculando as chances...'],
+    happy: ['Isso é matemática pura!', 'Probabilidade a meu favor!'],
+    excited: ['YAR! Nota dez pra mim!', 'Isso cai na prova!'],
+    annoyed: ['Zero... sem direito a recuperação.', 'Isso não estava no plano de aula.'],
+    surprised: ['Ei! Quem te ensinou isso?', 'Opa, alguém estudou!'],
+    taunt: ['Zerou? Recuperação pra você!', 'Faltou estudar, hein?'],
+    victory: ['Aula encerrada. Vitória do professor!'],
+    defeat: ['Aprovado com louvor! Revanche na próxima aula.'],
+    tie: ['Empate! Ninguém reprovou hoje.'],
+    greeting_easy: ['Vou pegar leve, prometo.'],
+    greeting_medium: ['Vamos ver se você fez a lição.'],
+    greeting_hard: ['Espero que tenha estudado.'],
   },
 };
 
@@ -101,9 +101,14 @@ export function getCharacter(id) {
   return character;
 }
 
+/** Pose usada por uma reação. */
+export function poseForReaction(character, reaction) {
+  return character.reactionPoses?.[reaction] ?? reaction;
+}
+
 // ---------- regras de reação (puras) ----------
 
-/** Reação ao marcar uma categoria: 'annoyed' | 'excited' | 'happy' | null. */
+/** O dono do personagem marcou: 'annoyed' | 'excited' | 'happy' | null. */
 export function reactToOwnScore({ categoryId, points }, rules = REACTION_RULES) {
   if (points === 0) return 'annoyed';
   if (rules.excitedCategories.includes(categoryId)) return 'excited';
@@ -113,32 +118,47 @@ export function reactToOwnScore({ categoryId, points }, rules = REACTION_RULES) 
   return null;
 }
 
-/** Reação a uma tirada (antes de marcar): 'excited' | null. */
+/** O dono do personagem tirou cartas (antes de marcar): 'excited' | null. */
 export function reactToOwnDraw(hand, rules = REACTION_RULES) {
   if (hand.length !== 5) return null;
   const scores = scoreHand(hand);
   return rules.excitedDrawCategories.some((c) => scores[c] > 0) ? 'excited' : null;
 }
 
-/** Reação a uma jogada do adversário: 'surprised' | null. */
+/** O adversário marcou: 'taunt' (zerou) | 'surprised' | null. */
 export function reactToOpponentScore({ categoryId, points }, rules = REACTION_RULES) {
+  if (points === 0) return 'taunt';
   if (points >= rules.surprisedMinPoints) return 'surprised';
-  if (points > 0 && rules.surprisedCategories.includes(categoryId)) return 'surprised';
+  if (rules.surprisedCategories.includes(categoryId)) return 'surprised';
   return null;
 }
 
-/** Pose da tela de fim de jogo (empate = happy). */
-export function resultPose({ won, tie }) {
-  if (tie) return 'happy';
+/** Reação ao resultado da partida: 'victory' | 'defeat' | 'tie'. */
+export function resultReaction({ won, tie }) {
+  if (tie) return 'tie';
   return won ? 'victory' : 'defeat';
 }
 
-/** Frase sorteada da pose, sem repetir a anterior (quando há alternativa). */
-export function pickLine(character, pose, previous, rng = Math.random) {
-  const lines = character.lines[pose] ?? [];
+/** Frase sorteada da reação, sem repetir a anterior (quando há alternativa). */
+export function pickLine(character, lineKey, previous, rng = Math.random) {
+  const lines = character.lines[lineKey] ?? [];
   if (lines.length === 0) return null;
   const options = lines.length > 1 ? lines.filter((l) => l !== previous) : lines;
   return options[Math.floor(rng() * options.length)];
+}
+
+// ---------- miniaturas ----------
+
+/** Estilo (background) para mostrar só o rosto num quadrado de `sizePx`. */
+export function faceStyle(character, sizePx) {
+  const { x, y, size } = character.face;
+  const bgWidth = sizePx / size; // largura da imagem inteira, em px
+  const bgHeight = (bgWidth * 578) / 432;
+  return {
+    backgroundImage: `url("${character.images.neutral}")`,
+    backgroundSize: `${bgWidth}px ${bgHeight}px`,
+    backgroundPosition: `${sizePx / 2 - x * bgWidth}px ${sizePx / 2 - y * bgHeight}px`,
+  };
 }
 
 // ---------- pré-carregamento ----------

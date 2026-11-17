@@ -1,5 +1,5 @@
 /**
- * Difícil — Islin. Para cada combinação de cartas trancadas, simula ~200
+ * Difícil (Prof. Alishow — Banca de Prova). Para cada combinação de cartas trancadas, simula ~200
  * tiradas sorteando do baralho restante do turno (sem olhar a ordem real) e
  * avalia a mão resultante com tabelas de antecipação calculadas para a
  * composição atual do baralho (lookahead.js), considerando só as categorias

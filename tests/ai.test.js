@@ -87,11 +87,11 @@ describe('NPCs — partidas completas sem jogadas inválidas', () => {
 });
 
 describe('interface comum', () => {
-  it('NPCS tem os 3 níveis com nomes do CLAUDE.md', () => {
-    expect(NPCS.map((n) => [n.id, n.name])).toEqual([
-      ['easy', 'Igor'],
-      ['medium', 'Eileen'],
-      ['hard', 'Islin'],
+  it('NPCS tem os 3 níveis (a apresentação como Prof. Alishow fica na UI)', () => {
+    expect(NPCS.map((n) => [n.id, n.label])).toEqual([
+      ['easy', 'Fácil'],
+      ['medium', 'Médio'],
+      ['hard', 'Difícil'],
     ]);
     expect(() => getNpc('xyz')).toThrow();
   });

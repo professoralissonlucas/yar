@@ -1,5 +1,6 @@
 import { NPCS, getNpc } from '../ai/index.js';
 import { MODES } from '../core/modes.js';
+import { ALISHOW } from './characters.js';
 import { showGameOver } from './screens/gameOver.js';
 import { DEFAULT_NAMES, showStart } from './screens/start.js';
 import { showTable } from './screens/table.js';
@@ -45,9 +46,9 @@ function buildSeats(config) {
   if (config.matchType === 'npc') {
     const npc = getNpc(config.npcLevel);
     return [
-      // o humano contra a máquina joga como o Prof. Alishow
-      { id: 'p1', name: config.playerName, controller: 'local', character: 'alishow' },
-      { id: 'npc', name: npc.name, controller: 'npc', npcLevel: npc.id },
+      { id: 'p1', name: config.playerName, controller: 'local' },
+      // a máquina é o Prof. Alishow, no modo (nível) escolhido
+      { id: 'npc', name: ALISHOW.name, controller: 'npc', npcLevel: npc.id, character: ALISHOW.id },
     ];
   }
   return config.names.map((name, i) => ({ id: `p${i + 1}`, name, controller: 'local' }));

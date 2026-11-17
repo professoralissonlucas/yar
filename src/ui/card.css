@@ -37,11 +37,6 @@
     border-color 0.15s ease;
 }
 
-/* Mesa com personagem ao lado: cartas um pouco menores para caber as 5 */
-.table-layout--with-avatar {
-  --card-w: 86px;
-}
-
 .card:disabled {
   cursor: default;
 }
@@ -136,8 +131,7 @@
 }
 
 @media (max-width: 760px) {
-  :root,
-  .table-layout--with-avatar {
+  :root {
     --card-w: min(16vw, 76px);
     --card-radius: 9px;
   }

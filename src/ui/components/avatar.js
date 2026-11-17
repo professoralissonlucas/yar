@@ -2,15 +2,14 @@
  * Avatar genérico de personagem: figura (poses com fade) + balão de fala.
  * Funciona com qualquer personagem de src/ui/characters.js.
  *
- * - Pose base (ex.: neutral, ou thinking durante a vez do adversário).
- * - Reação temporária: mostra a pose e uma frase por CHARACTER_TIMING.reactionMs
- *   e volta para a pose base.
+ * - Pose base (ex.: neutral, ou thinking durante a vez do dono).
+ * - Reação temporária: mostra a pose da reação e uma frase por
+ *   CHARACTER_TIMING.reactionMs e volta para a pose base.
  *
- * `figure` e `speech` são elementos separados para o layout poder posicioná-los
- * (balão acima da cabeça no desktop, faixa no celular).
+ * `figure` e `speech` são elementos separados para o layout posicioná-los.
  */
 
-import { CHARACTER_TIMING, pickLine } from '../characters.js';
+import { CHARACTER_TIMING, pickLine, poseForReaction } from '../characters.js';
 import { h } from '../dom.js';
 
 const POSE_LABELS = {
@@ -30,13 +29,21 @@ const ANIMATION_BY_POSE = {
   annoyed: 'avatar--shake',
 };
 
-export function createAvatar(character, { pose = 'neutral', rng = Math.random, timing = CHARACTER_TIMING } = {}) {
-  let basePose = pose;
+/**
+ * @param {object} character
+ * @param {{ pose?: string, caption?: boolean, holdSpeech?: boolean, rng?: () => number, timing?: object }} options
+ *   holdSpeech: o balão não some sozinho (tela de fim de jogo).
+ */
+export function createAvatar(
+  character,
+  { pose = 'neutral', caption = true, holdSpeech = false, rng = Math.random, timing = CHARACTER_TIMING } = {},
+) {
+  let basePose = poseForReaction(character, pose);
   let currentPose = null;
   let lastLine = null;
   let reactionTimer = null;
   let speechTimer = null;
-  let sayBaseWhenFree = false;
+  let baseLineWhenFree = null;
   let destroyed = false;
 
   const stack = h('div', { class: 'avatar__stack' });
@@ -44,7 +51,7 @@ export function createAvatar(character, { pose = 'neutral', rng = Math.random, t
     'figure',
     { class: 'avatar', dataset: { character: character.id }, style: { '--avatar-fade': `${timing.fadeMs}ms` } },
     h('div', { class: 'avatar__frame' }, stack),
-    h('figcaption', { class: 'avatar__name' }, character.name),
+    caption && h('figcaption', { class: 'avatar__name' }, character.name),
   );
   const speechText = h('span', { class: 'avatar__speech-text' });
   const speech = h('div', { class: 'avatar__speech', role: 'status', 'aria-live': 'polite' }, speechText);
@@ -74,52 +81,65 @@ export function createAvatar(character, { pose = 'neutral', rng = Math.random, t
     setTimeout(() => previous.forEach((el) => el.remove()), timing.fadeMs + 30);
   }
 
-  function animate(next) {
+  function animate(posed) {
     figure.classList.remove('avatar--hop', 'avatar--shake');
-    const cls = ANIMATION_BY_POSE[next];
+    const cls = ANIMATION_BY_POSE[posed];
     if (!cls) return;
     void figure.offsetWidth; // reinicia a animação se a mesma pose se repetir
     figure.classList.add(cls);
   }
 
-  function say(forPose) {
-    const line = pickLine(character, forPose, lastLine, rng);
+  /** Mostra uma frase da lista `lineKey` (some depois de reactionMs). */
+  function say(lineKey) {
+    const line = pickLine(character, lineKey, lastLine, rng);
     if (!line) return;
     lastLine = line;
     speechText.textContent = line;
     speech.classList.add('is-visible');
+    figure.dataset.speaking = 'true';
     clearTimeout(speechTimer);
-    speechTimer = setTimeout(() => speech.classList.remove('is-visible'), timing.reactionMs);
+    if (holdSpeech) return;
+    speechTimer = setTimeout(() => {
+      speech.classList.remove('is-visible');
+      delete figure.dataset.speaking;
+    }, timing.reactionMs);
   }
 
-  /** Reação temporária; volta para a pose base depois de reactionMs. */
-  function react(next) {
-    if (destroyed || !next) return;
+  /**
+   * Reação temporária (ex.: 'happy', 'taunt', 'greeting'); volta para a pose
+   * base depois de reactionMs. `lineKey` troca a lista de frases (padrão: a reação).
+   */
+  function react(reaction, { lineKey = reaction } = {}) {
+    if (destroyed || !reaction) return;
     clearTimeout(reactionTimer);
-    showPose(next);
-    animate(next);
-    say(next);
+    const posed = poseForReaction(character, reaction);
+    showPose(posed);
+    animate(posed);
+    say(lineKey);
     reactionTimer = setTimeout(() => {
       reactionTimer = null;
       if (destroyed) return;
       showPose(basePose);
       animate(basePose);
-      if (sayBaseWhenFree) say(basePose);
-      sayBaseWhenFree = false;
+      if (baseLineWhenFree) say(baseLineWhenFree);
+      baseLineWhenFree = null;
     }, timing.reactionMs);
   }
 
-  /** Muda a pose base. Se houver reação em andamento, vale quando ela acabar. */
-  function setBase(next, { say: speak = false } = {}) {
+  /**
+   * Muda a pose base (reação "permanente", ex.: 'thinking' ou 'victory').
+   * Se houver reação em andamento, vale quando ela acabar.
+   */
+  function setBase(reaction, { say: speak = false } = {}) {
     if (destroyed) return;
-    basePose = next;
+    basePose = poseForReaction(character, reaction);
     if (reactionTimer) {
-      sayBaseWhenFree = speak;
+      baseLineWhenFree = speak ? reaction : null;
       return;
     }
-    showPose(next);
-    animate(next);
-    if (speak) say(next);
+    showPose(basePose);
+    animate(basePose);
+    if (speak) say(reaction);
   }
 
   function destroy() {

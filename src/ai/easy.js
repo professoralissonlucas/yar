@@ -1,5 +1,5 @@
 /**
- * Fácil — Igor. Tranca o valor que mais se repete, para quando tem algo bom
+ * Fácil (Prof. Alishow — Bonzinho). Tranca o valor que mais se repete, para quando tem algo bom
  * por acaso e marca a categoria que dá mais pontos agora (guloso).
  * 20% de chance de fazer uma escolha aleatória.
  */

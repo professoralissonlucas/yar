@@ -89,13 +89,23 @@ Os modos ficam num arquivo de dados (`src/core/modes.js`) para serem fáceis de 
 
 ---
 
-## NPCs (contra a máquina)
+## Contra a máquina: Prof. Alishow
 
-Todos usam a mesma interface (`src/ai/`): `decideAction(state, playerId, rng)` → `{ type: 'draw', locks: [5 booleanos] }` ou `{ type: 'score', category }`. Jogadas do NPC aparecem na tela com pequenas pausas (~700 ms) para o jogador acompanhar. Valores esperados por categoria: `src/ai/expectedValues.js`, gerado por `npm run calibrate`; comparação entre níveis: `npm run tournament`.
+A máquina é **o Prof. Alishow** (personagem com poses, frases e reações em `src/ui/characters.js`). O jogador humano só digita o próprio nome. Os 3 níveis de IA aparecem como **modos do professor**:
 
-1. **Fácil — "Igor"**: tranca as cartas do valor que mais se repete; para de tirar se já tiver algo bom por acaso; marca a categoria que dá **mais pontos agora** (guloso). 20% de chance de uma escolha aleatória.
-2. **Médio — "Eileen"**: heurísticas por objetivo (busca trinca/quadra, sequência quando tem 3-4 em sequência, full house quando tem dois pares). Escolhe a categoria comparando os pontos com a **média esperada** daquela categoria (evita gastar Kkakdugi ou Yar! cedo, prefere zerar categorias de baixo valor como Fragmento Um).
-3. **Difícil — "Islin"**: para cada uma das 32 combinações de trancar/não trancar, simula N tiradas (Monte Carlo, ~200 por combinação, respeitando as cartas restantes no baralho) e escolhe a de **maior valor esperado** considerando só as categorias ainda vazias, com pesos que valorizam categorias raras (Yar!, Corda). Na escolha de categoria usa a mesma lógica do Médio com tabela de valores esperados calibrada por simulação.
+| nível (`src/ai/`) | Modo | Selo | Frase |
+|---|---|---|---|
+| `easy` | Prof. Alishow — **Bonzinho** | FÁCIL | "Dá umas colher de chá." |
+| `medium` | Prof. Alishow — **Exigente** | MÉDIO | "Joga com estratégia." |
+| `hard` | Prof. Alishow — **Banca de Prova** | DIFÍCIL | "Calcula cada probabilidade." |
+
+Todos os níveis usam a mesma interface (`src/ai/`): `decideAction(state, playerId, rng)` → `{ type: 'draw', locks: [5 booleanos] }` ou `{ type: 'score', category }`. As jogadas da máquina aparecem na tela com pequenas pausas (~700 ms) para o jogador acompanhar. Valores esperados por categoria: `src/ai/expectedValues.js`, gerado por `npm run calibrate`; comparação entre níveis: `npm run tournament`.
+
+1. **Fácil (Bonzinho)**: tranca as cartas do valor que mais se repete; para de tirar se já tiver algo bom por acaso; marca a categoria que dá **mais pontos agora** (guloso). 20% de chance de uma escolha aleatória.
+2. **Médio (Exigente)**: heurísticas por objetivo (busca trinca/quadra, sequência quando tem 3-4 em sequência, full house quando tem dois pares). Escolhe a categoria comparando os pontos com a **média esperada** daquela categoria (evita gastar Kkakdugi ou Yar! cedo, prefere zerar categorias de baixo valor como Fragmento Um).
+3. **Difícil (Banca de Prova)**: para cada uma das 32 combinações de trancar/não trancar, simula N tiradas (Monte Carlo, ~200 por combinação, respeitando as cartas restantes no baralho) e escolhe a de **maior valor esperado** considerando só as categorias ainda vazias, com pesos que valorizam categorias raras (Yar!, Corda). Na escolha de categoria usa a mesma lógica do Médio com tabela de valores esperados calibrada por simulação.
+
+Reações do professor (do ponto de vista dele): pensa na vez dele; fica feliz/empolgado/irritado com as próprias jogadas; fica surpreso quando o jogador marca 25+ ou faz Yar!; provoca quando o jogador zera; vitória/derrota/empate no fim. Na mesa ele fica do lado do adversário, grande, com o balão ao lado da cabeça; o jogador aparece só com o nome.
 
 ---
 

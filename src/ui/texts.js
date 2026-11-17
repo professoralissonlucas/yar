@@ -20,12 +20,11 @@ export const CATEGORY_RULES = {
   chance: 'Soma de todas as cartas.',
 };
 
-/** Frase curta de cada NPC (tela inicial). */
-export const NPC_DESCRIPTIONS = {
-  easy: 'Vai no que dá mais pontos agora e às vezes se distrai.',
-  medium: 'Joga com objetivo: trincas, sequências e full house.',
-  hard: 'Calcula as chances de cada jogada com as cartas que sobram.',
-};
+/** Inicial do nome (para o círculo do jogador). */
+export function initialOf(name) {
+  const first = [...String(name ?? '').trim()][0];
+  return first ? first.toLocaleUpperCase('pt-BR') : '?';
+}
 
 export function categoryName(id) {
   return getCategory(id).name;

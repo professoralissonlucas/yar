@@ -28,8 +28,8 @@ function playGame(firstId, secondId) {
   let state = createGame({
     modeId: MODE,
     players: [
-      { id: firstId, name: getNpc(firstId).name },
-      { id: secondId, name: getNpc(secondId).name },
+      { id: firstId, name: getNpc(firstId).label },
+      { id: secondId, name: getNpc(secondId).label },
     ],
   });
   while (!isGameOver(state)) {
@@ -44,7 +44,7 @@ function playGame(firstId, secondId) {
 
 const pct = (n, d) => `${((100 * n) / d).toFixed(1)}%`;
 const avg = (list) => list.reduce((a, b) => a + b, 0) / list.length;
-const label = (id) => `${getNpc(id).label} (${getNpc(id).name})`;
+const label = (id) => getNpc(id).label;
 
 console.log(`Torneio — modo ${MODE}, ${GAMES} partidas por confronto, semente ${SEED}\n`);
 const started = performance.now();

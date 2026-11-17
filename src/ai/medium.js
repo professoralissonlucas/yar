@@ -1,5 +1,5 @@
 /**
- * Médio — Eileen. Heurísticas por objetivo (sequência, full house, trinca/quadra)
+ * Médio (Prof. Alishow — Exigente). Heurísticas por objetivo (sequência, full house, trinca/quadra)
  * e escolha de categoria comparando os pontos com o valor esperado da categoria.
  */
 
@@ -21,7 +21,7 @@ const STOP_GAIN = 8;
 
 /**
  * Custo extra de gastar estas categorias no começo da partida (diminui até 0
- * conforme a tabela enche): Eileen evita usar Yar! e Kkakdugi cedo.
+ * conforme a tabela enche): o Médio evita usar Yar! e Kkakdugi cedo.
  */
 export const EARLY_PROTECTION = { yar: 4, chance: 3 };
 
@@ -87,7 +87,7 @@ function chooseLocks(hand, empty) {
 }
 
 export function decideAction(state, playerId, rng) {
-  void rng; // Eileen é determinística
+  void rng; // o Médio é determinístico
   assertNpcTurn(state, playerId);
   if (state.turn.drawsUsed === 0) return drawAction();
 

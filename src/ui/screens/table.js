@@ -27,7 +27,7 @@ import { closeDialogs, confirmDialog, showTurnNotice } from '../components/dialo
 import { renderScoreboard } from '../components/scoreboard.js';
 import { createTurnTimer, formatSeconds } from '../components/turnTimer.js';
 import { h } from '../dom.js';
-import { categoryName, stars } from '../texts.js';
+import { categoryName, initialOf, stars } from '../texts.js';
 
 export const TURN_SECONDS = 45;
 const LOW_TIME_SECONDS = 10;
@@ -45,7 +45,8 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * estado atual, chama as funções do core e redesenha.
  *
  * players: [{ id, name, controller: 'local' | 'npc', npcLevel?, character? }] — no futuro, 'online'.
- * Um assento com `character` ganha avatar na mesa (hoje: o humano contra a máquina).
+ * Um assento com `character` aparece como personagem (hoje: o Prof. Alishow,
+ * que é a máquina); os outros aparecem só com o nome.
  */
 export function showTable(root, { players, modeId, timerEnabled, onExit, onGameOver }) {
   const rng = Math.random;
@@ -56,34 +57,60 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
   let destroyed = false;
   let remaining = TURN_SECONDS;
   let npcPick = null; // categoria que o NPC vai marcar (destaque)
+  let greeted = false;
 
   if (players.some((p) => p.controller === 'npc')) warmUp();
 
-  // Avatar (personagem) do assento que tiver um.
+  // Personagem do assento que tiver um (o Prof. Alishow, adversário).
   const avatarSeat = players.find((p) => p.character);
   const character = avatarSeat ? getCharacter(avatarSeat.character) : null;
   if (character) preloadCharacter(character);
-  const avatar = character ? createAvatar(character) : null;
+  const avatar = character ? createAvatar(character, { caption: false }) : null;
+
+  // Lados da mesa: adversário em cima (a máquina, ou o jogador 2 no modo
+  // local) e o jogador embaixo.
+  const topSeat = players.find((p) => p.controller === 'npc') ?? players.find((p) => p.id === 'p2') ?? players[1];
+  const bottomSeat = players.find((p) => p !== topSeat);
+  const isVsMachine = players.some((p) => p.controller === 'npc');
 
   // Esqueleto persistente: só o conteúdo dos painéis é redesenhado, então o
   // avatar nunca sai do DOM (o fade e as animações não reiniciam a cada clique).
   const headerEl = h('header', { class: 'table-header' });
   const scorePanel = h('section', { class: 'panel score-panel', 'aria-label': 'Tabela de pontuação' });
   const playArea = h('section', { class: 'panel play-area', 'aria-label': 'Mesa' });
-  const screen = h(
-    'div',
-    { class: 'screen table-screen' },
-    headerEl,
+  const topSeatEl = renderSeat(topSeat, 'top');
+  const bottomSeatEl = renderSeat(bottomSeat, 'bottom');
+  root.replaceChildren(
     h(
       'div',
-      { class: avatar ? 'table-layout table-layout--with-avatar' : 'table-layout' },
-      scorePanel,
-      playArea,
-      avatar && h('div', { class: 'avatar-speech-slot' }, avatar.speech),
-      avatar && h('div', { class: 'avatar-slot' }, avatar.figure),
+      { class: 'screen table-screen' },
+      headerEl,
+      h('div', { class: 'table-layout' }, scorePanel, topSeatEl, playArea, bottomSeatEl),
     ),
   );
-  root.replaceChildren(screen);
+
+  /** Assento: personagem (figura + balão ao lado) ou só o nome. */
+  function renderSeat(seat, side) {
+    const label = h(
+      'div',
+      { class: 'seat__label' },
+      !seat.character && h('span', { class: 'seat-initial', 'aria-hidden': 'true' }, initialOf(seat.name)),
+      h('strong', { class: 'seat__name' }, seat.name),
+      seat.character &&
+        seat.npcLevel &&
+        h('span', { class: 'badge badge--level' }, character.levels[seat.npcLevel].title),
+      h('span', { class: 'seat__turn' }, seat.controller === 'local' && isVsMachine ? 'Sua vez' : 'Na vez'),
+    );
+    if (seat === avatarSeat) {
+      return h(
+        'section',
+        { class: `seat seat--${side} seat--character`, 'aria-label': seat.name },
+        h('div', { class: 'seat__avatar' }, avatar.figure),
+        h('div', { class: 'seat__side' }, label, avatar.speech),
+      );
+    }
+    return h('section', { class: `seat seat--${side}`, 'aria-label': seat.name }, label);
+  }
 
   const timer = timerEnabled
     ? createTurnTimer({
@@ -218,8 +245,13 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
     if (destroyed) return;
     busy = false;
     render();
+    if (avatar && !greeted) {
+      greeted = true; // saudação do nível no começo da partida
+      avatar.react('greeting', { lineKey: `greeting_${avatarSeat.npcLevel}` });
+    }
+    // o personagem fica pensando durante a própria vez
+    if (avatar && currentSeat() === avatarSeat) avatar.setBase('thinking', { say: true });
     if (isNpcTurn()) {
-      avatar?.setBase('thinking', { say: true });
       runNpcTurn();
     } else {
       timer?.start(); // o timer vale só para o humano
@@ -347,27 +379,31 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
     const totalTurns = state.categories.length;
     const turnNumber = Math.min(state.round + 1, totalTurns);
 
+    // (replaceChildren do DOM escreveria "null"; por isso o filtro)
     headerEl.replaceChildren(
-      h(
-        'div',
-        { class: 'turn-info' },
-        h('span', { class: 'turn-info__label' }, 'Vez de'),
-        h('strong', { class: 'turn-info__name' }, current.name),
-        h('span', { class: 'turn-info__round' }, `Turno ${turnNumber}/${totalTurns}`),
-      ),
-      timer &&
-        !isNpcTurn() &&
+      ...[
         h(
           'div',
-          { class: timerClass(), role: 'timer', 'aria-label': 'Tempo restante do turno' },
-          formatSeconds(remaining),
+          { class: 'turn-info' },
+          h('span', { class: 'turn-info__label' }, 'Vez de'),
+          h('strong', { class: 'turn-info__name' }, current.name),
+          h('span', { class: 'turn-info__round' }, `Turno ${turnNumber}/${totalTurns}`),
         ),
-      h('button', { type: 'button', class: 'btn btn--ghost btn--small', onClick: onExitClick }, 'Sair'),
+        timer &&
+          !isNpcTurn() &&
+          h(
+            'div',
+            { class: timerClass(), role: 'timer', 'aria-label': 'Tempo restante do turno' },
+            formatSeconds(remaining),
+          ),
+        h('button', { type: 'button', class: 'btn btn--ghost btn--small', onClick: onExitClick }, 'Sair'),
+      ].filter(Boolean),
     );
 
     scorePanel.replaceChildren(
       renderScoreboard({
         state,
+        seats: players,
         interactive: canAct(),
         showPreview: !busy && isNpcTurn(),
         highlight: npcPick,
@@ -386,6 +422,11 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
         h('span', { class: 'deck-count' }, `Baralho: ${deckCount()} cartas`),
       ),
     );
+
+    // destaca o lado de quem está na vez
+    const playing = state.status === 'playing';
+    topSeatEl.classList.toggle('seat--active', playing && current.id === topSeat.id);
+    bottomSeatEl.classList.toggle('seat--active', playing && current.id === bottomSeat.id);
 
     dealtIndices = new Set(); // a animação só roda uma vez
     if (focusKey) root.querySelector(`[data-focus-key="${focusKey}"]`)?.focus();
