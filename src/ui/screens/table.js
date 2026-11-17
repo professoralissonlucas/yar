@@ -33,6 +33,10 @@ import { categoryName, initialOf, stars } from '../texts.js';
 export const TURN_SECONDS = 45;
 const LOW_TIME_SECONDS = 10;
 const DEAL_STAGGER_MS = 70;
+/** Duração da animação de uma carta chegando (card.css → card-deal). */
+const DEAL_ANIMATION_MS = 450;
+/** "Tirar cartas" fica bloqueado depois de cada tirada (evita clique duplo). */
+export const DRAW_COOLDOWN_MIN_MS = 700;
 /** Ritmo das jogadas do NPC. */
 const NPC_PAUSE_MS = 700;
 const NPC_LOCK_STEP_MS = 280;
@@ -59,6 +63,9 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
   let remaining = TURN_SECONDS;
   let npcPick = null; // categoria que o NPC vai marcar (destaque)
   let greeted = false;
+  let cooldownTimer = null; // "Tirar cartas" bloqueado enquanto as cartas chegam
+  let scoring = false; // marcação em andamento (ignora cliques repetidos)
+  let scoreAnimPending = false; // animar a célula recém-marcada no próximo desenho
 
   if (players.some((p) => p.controller === 'npc')) warmUp();
 
@@ -81,7 +88,25 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
   // botões) fica fixo embaixo. No desktop o dock é display: contents.
   const headerEl = h('header', { class: 'table-header' });
   const scorePanel = h('section', { class: 'panel score-panel', 'aria-label': 'Tabela de pontuação' });
-  const playArea = h('section', { class: 'panel play-area', 'aria-label': 'Mesa' });
+  // Área das cartas com elementos persistentes: trancar uma carta troca só
+  // aquela carta, e o botão "Tirar cartas" nunca é recriado (o cooldown e a
+  // barra de progresso não reiniciam a cada desenho).
+  const handEl = h('div', { class: 'hand' });
+  const hintEl = h('p', { class: 'hint', 'aria-live': 'polite' });
+  const drawLabel = h('span', { class: 'draw-button__label' });
+  const drawButton = h(
+    'button',
+    { type: 'button', class: 'btn btn--primary btn--large draw-button', onClick: onDraw, dataset: { focusKey: 'draw' } },
+    drawLabel,
+  );
+  const deckEl = h('span', { class: 'deck-count' });
+  const playArea = h(
+    'section',
+    { class: 'panel play-area', 'aria-label': 'Mesa' },
+    handEl,
+    hintEl,
+    h('div', { class: 'controls' }, drawButton, deckEl),
+  );
   const topSeatEl = renderSeat(topSeat, 'top');
   const bottomSeatEl = renderSeat(bottomSeat, 'bottom');
   const screenEl = h(
@@ -98,31 +123,47 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
   // dica das categorias: nunca cobre as cartas; na vez do jogador mostra a mão
   const tips = attachCategoryTips(screenEl, {
     getHandPoints: () => currentHandPoints(),
-    avoid: () => [playArea.querySelector('.hand')],
+    avoid: () => [handEl],
   });
   root.replaceChildren(screenEl);
 
-  /** Assento: personagem (nome em cima; figura e balão ao lado da cabeça) ou só o nome. */
+  /**
+   * Assento: personagem atrás da mesa de professor (plaquinha com nome e modo
+   * na frente da mesa, balão ao lado da cabeça) ou só o nome.
+   */
   function renderSeat(seat, side) {
-    const label = h(
-      'div',
-      { class: 'seat__label' },
-      !seat.character && h('span', { class: 'seat-initial', 'aria-hidden': 'true' }, initialOf(seat.name)),
-      h('strong', { class: 'seat__name' }, seat.name),
-      seat.character &&
-        seat.npcLevel &&
-        h('span', { class: 'badge badge--level' }, character.levels[seat.npcLevel].title),
-      h('span', { class: 'seat__turn' }, seat.controller === 'local' && isVsMachine ? 'Sua vez' : 'Na vez'),
-    );
+    const turnChip = h('span', { class: 'seat__turn' }, seat.controller === 'local' && isVsMachine ? 'Sua vez' : 'Na vez');
     if (seat === avatarSeat) {
+      const level = seat.npcLevel ? character.levels[seat.npcLevel] : null;
       return h(
         'section',
         { class: `seat seat--${side} seat--character`, 'aria-label': seat.name },
-        label,
-        h('div', { class: 'seat__avatar' }, avatar.figure),
-        avatar.speech,
+        h(
+          'div',
+          { class: 'seat__stage' },
+          h('div', { class: 'seat__avatar' }, avatar.figure),
+          avatar.speech,
+          h(
+            'div',
+            { class: 'desk' },
+            h(
+              'div',
+              { class: 'desk__plaque' },
+              h('strong', { class: 'desk__name' }, seat.name),
+              level && h('span', { class: 'badge badge--level desk__badge' }, level.title),
+            ),
+            turnChip,
+          ),
+        ),
       );
     }
+    const label = h(
+      'div',
+      { class: 'seat__label' },
+      h('span', { class: 'seat-initial', 'aria-hidden': 'true' }, initialOf(seat.name)),
+      h('strong', { class: 'seat__name' }, seat.name),
+      turnChip,
+    );
     return h('section', { class: `seat seat--${side}`, 'aria-label': seat.name }, label);
   }
 
@@ -158,6 +199,12 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
         : turn.locked.flatMap((locked, i) => (locked ? [] : [i]));
     state = draw(state, rng);
     dealtIndices = new Set(replaced);
+    // até a última carta terminar de chegar (no mínimo DRAW_COOLDOWN_MIN_MS)
+    if (isLocalTurn()) {
+      startDrawCooldown(
+        Math.max(DRAW_COOLDOWN_MIN_MS, DEAL_ANIMATION_MS + (replaced.length - 1) * DEAL_STAGGER_MS),
+      );
+    }
     render();
     if (avatar && getCurrentPlayer(state).id === avatarSeat.id) {
       avatar.react(reactToOwnDraw(state.turn.hand)); // 5 iguais ou sequência de 5
@@ -165,31 +212,39 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
   }
 
   function onDraw() {
-    if (!canAct() || !canDraw(state)) return;
+    // cliques durante o cooldown são ignorados (não enfileiram)
+    if (cooldownTimer !== null || !canAct() || !canDraw(state)) return;
     performDraw();
   }
 
   function onToggleLock(index) {
     if (!canAct() || state.turn.drawsUsed === 0) return;
     state = toggleLock(state, index);
-    render();
+    updateCard(index);
+    updatePlayStatus();
   }
 
   async function onScore(categoryId) {
-    if (!canAct() || !canScore(state, categoryId)) return;
-    const points = getScoreOptions(state)[categoryId];
-    if (points === 0) {
-      const turnBefore = state.turn;
-      const confirmed = await confirmDialog({
-        title: `Zerar ${categoryName(categoryId)}?`,
-        message: 'Esta mão não pontua nessa categoria. Ela ficará com 0 pontos até o fim da partida.',
-        confirmText: 'Zerar',
-        danger: true,
-      });
-      // o tempo pode ter acabado enquanto o diálogo estava aberto
-      if (!confirmed || state.turn !== turnBefore || !canAct()) return;
+    // ignora cliques repetidos enquanto a marcação (ou o "Zerar?") está em andamento
+    if (scoring || !canAct() || !canScore(state, categoryId)) return;
+    scoring = true;
+    try {
+      const points = getScoreOptions(state)[categoryId];
+      if (points === 0) {
+        const turnBefore = state.turn;
+        const confirmed = await confirmDialog({
+          title: `Zerar ${categoryName(categoryId)}?`,
+          message: 'Esta mão não pontua nessa categoria. Ela ficará com 0 pontos até o fim da partida.',
+          confirmText: 'Zerar',
+          danger: true,
+        });
+        // o tempo pode ter acabado enquanto o diálogo estava aberto
+        if (!confirmed || state.turn !== turnBefore || !canAct()) return;
+      }
+      finishTurn(scoreTurn(state, categoryId));
+    } finally {
+      scoring = false;
     }
-    finishTurn(scoreTurn(state, categoryId));
   }
 
   function handleTimeout() {
@@ -238,7 +293,8 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
           if (state.turn.locked[i] === action.locks[i]) continue;
           state = toggleLock(state, i);
           changed = true;
-          render();
+          updateCard(i);
+          updatePlayStatus();
           await sleep(NPC_LOCK_STEP_MS);
           if (destroyed) return;
         }
@@ -284,9 +340,12 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
 
   async function finishTurn(next, { timedOut = false, pauseBeforeNotice = 0 } = {}) {
     timer?.stop();
+    clearTimeout(cooldownTimer);
+    cooldownTimer = null;
     state = next;
     dealtIndices = new Set();
     busy = true;
+    scoreAnimPending = true;
     render();
     reactToLastScore();
     if (pauseBeforeNotice > 0) {
@@ -318,6 +377,7 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
   function destroy() {
     destroyed = true;
     timer?.stop();
+    clearTimeout(cooldownTimer);
     avatar?.destroy();
     tips.destroy();
     closeDialogs();
@@ -339,37 +399,70 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
     return 'Sem tiradas: escolha uma categoria na tabela.';
   }
 
-  function renderHand() {
+  /** Elemento de uma carta da mão (frente). */
+  function cardElement(i, { dealt = false, delay = 0 } = {}) {
     const { turn } = state;
-    if (turn.drawsUsed === 0) return Array.from({ length: HAND_SIZE }, renderCardBack);
     const lockable = canAct() && turn.drawsUsed < state.maxDraws;
-    const order = [...dealtIndices];
-    return turn.hand.map((value, i) =>
-      renderCard(value, {
-        locked: turn.locked[i],
-        dealt: dealtIndices.has(i),
-        delay: order.indexOf(i) * DEAL_STAGGER_MS,
-        disabled: !lockable,
-        onClick: () => onToggleLock(i),
-        focusKey: `card-${i}`,
-      }),
-    );
+    return renderCard(turn.hand[i], {
+      locked: turn.locked[i],
+      dealt,
+      delay,
+      disabled: !lockable,
+      onClick: () => onToggleLock(i),
+      focusKey: `card-${i}`,
+    });
   }
 
-  function renderDrawButton() {
+  function renderHand() {
+    const { turn } = state;
+    if (turn.drawsUsed === 0) {
+      handEl.replaceChildren(...Array.from({ length: HAND_SIZE }, renderCardBack));
+    } else {
+      const order = [...dealtIndices];
+      handEl.replaceChildren(
+        ...turn.hand.map((_, i) =>
+          cardElement(i, { dealt: dealtIndices.has(i), delay: order.indexOf(i) * DEAL_STAGGER_MS }),
+        ),
+      );
+    }
+    dealtIndices = new Set(); // a animação só roda uma vez
+  }
+
+  /** Trancar/destrancar: troca só a carta clicada (a tabela não é redesenhada). */
+  function updateCard(i) {
+    const old = handEl.children[i];
+    if (!old || state.turn.drawsUsed === 0) return;
+    const hadFocus = old === document.activeElement;
+    const next = cardElement(i);
+    old.replaceWith(next);
+    if (hadFocus) next.focus();
+  }
+
+  /** Dica de texto, botão "Tirar cartas" (persistente) e baralho. */
+  function updatePlayStatus() {
+    hintEl.textContent = hintText();
     const { drawsUsed } = state.turn;
     const shown = Math.min(drawsUsed + 1, state.maxDraws);
-    return h(
-      'button',
-      {
-        type: 'button',
-        class: 'btn btn--primary btn--large draw-button',
-        disabled: !canAct() || !canDraw(state),
-        onClick: onDraw,
-        dataset: { focusKey: 'draw' },
-      },
-      `Tirar cartas (${shown}/${state.maxDraws})`,
-    );
+    drawLabel.textContent = `Tirar cartas (${shown}/${state.maxDraws})`;
+    drawButton.disabled = !canAct() || !canDraw(state);
+    // no cooldown o botão continua focável (aria-disabled), mas ignora cliques
+    const cooling = cooldownTimer !== null;
+    drawButton.classList.toggle('draw-button--cooldown', cooling);
+    if (cooling) drawButton.setAttribute('aria-disabled', 'true');
+    else drawButton.removeAttribute('aria-disabled');
+    deckEl.textContent = `Baralho: ${deckCount()} cartas`;
+  }
+
+  /** Depois de tirar: botão bloqueado até a animação das cartas terminar. */
+  function startDrawCooldown(ms) {
+    clearTimeout(cooldownTimer);
+    drawButton.style.setProperty('--cooldown-ms', `${ms}ms`);
+    drawButton.classList.remove('draw-button--cooldown');
+    void drawButton.offsetWidth; // reinicia a barra de progresso
+    cooldownTimer = setTimeout(() => {
+      cooldownTimer = null;
+      if (!destroyed) updatePlayStatus();
+    }, ms);
   }
 
   function deckCount() {
@@ -431,28 +524,24 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
         showPreview: !busy && isNpcTurn(),
         highlight: npcPick,
         handPoints: currentHandPoints(),
+        // o destaque da célula recém-marcada roda uma vez só (no 1º desenho)
+        animateLast: scoreAnimPending,
         onScore,
       }),
     );
+    scoreAnimPending = false;
 
-    playArea.replaceChildren(
-      h('div', { class: 'hand' }, renderHand()),
-      h('p', { class: 'hint', 'aria-live': 'polite' }, hintText()),
-      h(
-        'div',
-        { class: 'controls' },
-        renderDrawButton(),
-        h('span', { class: 'deck-count' }, `Baralho: ${deckCount()} cartas`),
-      ),
-    );
+    renderHand();
+    updatePlayStatus();
 
     // destaca o lado de quem está na vez
     const playing = state.status === 'playing';
     topSeatEl.classList.toggle('seat--active', playing && current.id === topSeat.id);
     bottomSeatEl.classList.toggle('seat--active', playing && current.id === bottomSeat.id);
 
-    dealtIndices = new Set(); // a animação só roda uma vez
-    if (focusKey) root.querySelector(`[data-focus-key="${focusKey}"]`)?.focus();
+    if (focusKey && document.activeElement?.dataset?.focusKey !== focusKey) {
+      root.querySelector(`[data-focus-key="${focusKey}"]`)?.focus();
+    }
     tips.refresh(); // a dica aberta acompanha a tabela nova (e a mão nova)
   }
 

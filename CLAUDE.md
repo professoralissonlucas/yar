@@ -39,7 +39,7 @@ tests/
 ### Turno
 1. O jogador clica em **"Tirar cartas"** e recebe 5 cartas (isso conta como a 1ª tirada).
 2. Pode **trancar** (🔒) qualquer carta clicando nela. Cartas trancadas não são trocadas.
-3. Clica em **"Tirar cartas"** de novo para trocar as não trancadas. O total de tiradas por turno é **3 ou 4**, conforme o modo (botão mostra `Tirar cartas (1/3)`).
+3. Clica em **"Tirar cartas"** de novo para trocar as não trancadas. O total de tiradas por turno é **3 ou 4**, conforme o modo (botão mostra `Tirar cartas (1/3)`). Depois de cada tirada o botão fica bloqueado até as cartas terminarem de chegar (mínimo 700 ms, com barra de progresso); cliques nesse tempo são ignorados. Marcar categoria também ignora cliques repetidos.
 4. A qualquer momento depois da 1ª tirada, o jogador escolhe **uma categoria ainda vazia** na tabela para marcar os pontos da mão atual. Isso encerra o turno.
 5. Se nenhuma categoria pontuar, ele **é obrigado a zerar** uma categoria vazia.
 6. **Timer opcional de 45 s** por turno (ligável nas opções). Se acabar: marca automaticamente a categoria vazia de maior pontuação; se todas dariam 0, zera a de menor potencial (ordem: Uns, Dois, …).
@@ -112,7 +112,7 @@ Todos os níveis usam a mesma interface (`src/ai/`): `decideAction(state, player
 2. **Médio (Exigente)**: heurísticas por objetivo (busca trinca/quadra, sequência quando tem 3-4 em sequência, full house quando tem dois pares). Escolhe a categoria comparando os pontos com a **média esperada** daquela categoria (evita gastar Chance ou Yar! cedo, prefere zerar categorias de baixo valor como Uns).
 3. **Difícil (Banca de Prova)**: para cada uma das 32 combinações de trancar/não trancar, simula N tiradas (Monte Carlo, ~200 por combinação, respeitando as cartas restantes no baralho) e escolhe a de **maior valor esperado** considerando só as categorias ainda vazias, com pesos que valorizam categorias raras (Yar!, Sequência Maior). Na escolha de categoria usa a mesma lógica do Médio com tabela de valores esperados calibrada por simulação.
 
-Reações do professor (do ponto de vista dele): pensa na vez dele; fica feliz/empolgado/irritado com as próprias jogadas; fica surpreso quando o jogador marca 25+ ou faz Yar!; provoca quando o jogador zera; vitória/derrota/empate no fim. Na mesa ele fica na coluna da direita (lado do adversário), grande, com o balão ao lado da cabeça; o jogador aparece só com o nome.
+Reações do professor (do ponto de vista dele): pensa na vez dele; fica feliz/empolgado/irritado com as próprias jogadas; fica surpreso quando o jogador marca 25+ ou faz Yar!; provoca quando o jogador zera; vitória/derrota/empate no fim. Na mesa ele fica na coluna da direita (lado do adversário), grande, **atrás de uma mesa de professor** (CSS: madeira escura, borda dourada, plaquinha com nome e modo), que cobre o corte das imagens nas coxas; o balão fica ao lado da cabeça; o jogador aparece só com o nome. O enquadramento por pose (`framing`, recorte em px da imagem) deixa a cabeça sempre do mesmo tamanho e altura, e a miniatura do rosto usa `faceCrop` (px da neutral.png) em todos os lugares (tabela, tela inicial, fim de jogo).
 
 ---
 

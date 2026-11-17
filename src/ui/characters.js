@@ -50,19 +50,24 @@ export const ALISHOW = {
   id: 'alishow',
   name: 'Prof. Alishow',
   images: imagesByPose(alishowFiles),
+  /** Tamanho (px) de todas as imagens de pose. */
+  imageSize: { width: 432, height: 578 },
   /**
-   * Ajuste de enquadramento por pose (zoom ancorado no topo). O thinking.png é
-   * corpo inteiro e os outros cortam nas coxas; o zoom deixa a cabeça do mesmo
-   * tamanho. Remova se a imagem for refeita no mesmo enquadramento.
+   * Enquadramento por pose: região da imagem original (px; canto superior
+   * esquerdo + largura, a altura segue a proporção) que preenche o quadro.
+   * Sem entrada = imagem inteira. O thinking.png é corpo inteiro e os outros
+   * cortam nas coxas: o recorte deixa a cabeça do mesmo tamanho e na mesma
+   * altura das outras poses (a mesa do professor cobre o resto).
    */
   framing: {
-    thinking: { scale: 1.5 },
+    thinking: { x: 85, y: 9, width: 262 },
   },
   /**
-   * Recorte do rosto na pose neutral (miniatura da tabela), em frações da
-   * imagem: centro (x, y) e lado do quadrado (size, fração da largura).
+   * Recorte do rosto (miniatura) na pose neutral, em px da imagem original:
+   * canto superior esquerdo (x, y) e lado do quadrado (size). Do topo do
+   * cabelo ao queixo, centralizado.
    */
-  face: { x: 0.51, y: 0.15, size: 0.3 },
+  faceCrop: { x: 134, y: 6, size: 176 },
   /** Modos do professor (um por nível de IA de src/ai/). */
   levels: {
     easy: { title: 'Bonzinho', badge: 'Fácil', description: 'Dá umas colher de chá.' },
@@ -149,15 +154,35 @@ export function pickLine(character, lineKey, previous, rng = Math.random) {
 
 // ---------- miniaturas ----------
 
-/** Estilo (background) para mostrar só o rosto num quadrado de `sizePx`. */
+/**
+ * Estilo (background) para mostrar só o rosto (faceCrop) num quadrado de
+ * `sizePx`. Use com `background-origin: border-box` (a borda fica por cima).
+ */
 export function faceStyle(character, sizePx) {
-  const { x, y, size } = character.face;
-  const bgWidth = sizePx / size; // largura da imagem inteira, em px
-  const bgHeight = (bgWidth * 578) / 432;
+  const { x, y, size } = character.faceCrop;
+  const { width, height } = character.imageSize;
+  const k = sizePx / size; // px da miniatura por px da imagem
+  const px = (n) => `${Math.round(n * 100) / 100}px`;
   return {
     backgroundImage: `url("${character.images.neutral}")`,
-    backgroundSize: `${bgWidth}px ${bgHeight}px`,
-    backgroundPosition: `${sizePx / 2 - x * bgWidth}px ${sizePx / 2 - y * bgHeight}px`,
+    backgroundSize: `${px(width * k)} ${px(height * k)}`,
+    backgroundPosition: `${px(-x * k)} ${px(-y * k)}`,
+  };
+}
+
+/**
+ * Posição da imagem de uma pose dentro do quadro (mesma proporção da imagem),
+ * a partir de `framing`: largura e deslocamento em % do quadro.
+ */
+export function poseImageStyle(character, pose) {
+  const { width, height } = character.imageSize;
+  const crop = character.framing?.[pose] ?? { x: 0, y: 0, width };
+  const cropHeight = (crop.width * height) / width;
+  const pct = (n) => `${Math.round(n * 10000) / 100}%`;
+  return {
+    width: pct(width / crop.width),
+    left: pct(-crop.x / crop.width),
+    top: pct(-crop.y / cropHeight),
   };
 }
 

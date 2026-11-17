@@ -46,6 +46,7 @@ const VIEWPORTS = [
 /** Resultado das checagens de cada print (resumo no fim). */
 const results = [];
 const tipReports = [];
+const behaviorReports = [];
 
 /** Recursos abertos, para o cleanup (inclusive no Ctrl+C). */
 let activePreview = null;
@@ -242,6 +243,69 @@ async function shoot(page, name, size) {
   console.log('  ✓', `screenshots/${file}`, flag);
 }
 
+/**
+ * Faixa com as cartas A–6 lado a lado (mesma marcação de renderCard em
+ * src/ui/components/card.js), para conferir o alinhamento dos números.
+ */
+async function shootCardStrip(page, size) {
+  await page.evaluate(() => {
+    const strip = document.createElement('div');
+    strip.id = 'card-check';
+    strip.className = 'hand';
+    strip.style.cssText =
+      'position:fixed;left:8px;top:8px;z-index:999;padding:16px;gap:12px;background:#134a37;border-radius:12px;--card-w:72px;';
+    for (const label of ['A', '2', '3', '4', '5', '6']) {
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'card';
+      for (const cls of ['card__corner card__corner--top', 'card__value', 'card__corner card__corner--bottom']) {
+        const span = document.createElement('span');
+        span.className = cls;
+        span.textContent = label;
+        card.append(span);
+      }
+      strip.append(card);
+    }
+    document.body.append(strip);
+  });
+  const file = `cards-${size}.png`;
+  await page.locator('#card-check').screenshot({ path: `${OUT}${file}`, animations: 'disabled' });
+  console.log('  ✓', `screenshots/${file}`);
+  await page.evaluate(() => document.getElementById('card-check')?.remove());
+}
+
+/** Clique duplo em "Tirar cartas": só 1 tirada conta; bloqueado e depois liberado. */
+async function checkDrawCooldown(page, drawButton) {
+  await drawButton.dblclick();
+  await page.clock.runFor(60);
+  const label = (await drawButton.innerText()).trim();
+  const deck = (await page.locator('.deck-count').innerText()).trim();
+  const blocked = (await drawButton.getAttribute('aria-disabled')) === 'true';
+  await page.clock.runFor(800);
+  const released = (await drawButton.getAttribute('aria-disabled')) === null;
+  const ok = label.includes('(2/') && deck.includes('31') && blocked && released;
+  console.log(`  ${ok ? '✓' : '!'} clique duplo: ${label}, ${deck}, bloqueado ${blocked}, liberado ${released}`);
+  return { ok, label, deck, blocked, released };
+}
+
+/** Trancar/destrancar não redesenha a tabela nem reinicia a animação da célula marcada. */
+async function checkLockKeepsTable(page) {
+  await page.evaluate(() => {
+    window.__scoreTable = document.querySelector('.scoreboard');
+  });
+  const card = page.locator('.hand button.card').first();
+  await card.click(); // tranca
+  await card.click(); // destranca
+  await card.click(); // tranca (fica assim no print)
+  const result = await page.evaluate(() => ({
+    sameTable: document.querySelector('.scoreboard') === window.__scoreTable,
+    animating: document.querySelectorAll('.cell--just-scored').length,
+  }));
+  const ok = result.sameTable && result.animating === 0;
+  console.log(`  ${ok ? '✓' : '!'} trancar/destrancar: mesma tabela ${result.sameTable}, células animando ${result.animating}`);
+  return { ok, ...result };
+}
+
 /** Dica aberta (mouse no desktop, toque no celular) + varredura de todas as categorias. */
 async function checkTips(page, size, touch) {
   const trigger = page.locator('.cat-name').filter({ hasText: 'Trinca' });
@@ -294,10 +358,13 @@ async function run(browser, url, { name: size, full = false, ...contextOptions }
     await page.locator('label.option--mode').filter({ hasText: 'Completo' }).click();
     await page.waitForTimeout(50);
     if (full) await shoot(page, 'home', size);
+    await shootCardStrip(page, size);
 
     // ---- partida ----
     await page.getByRole('button', { name: 'Jogar' }).click();
     const shots = { player: false, professor: false };
+    const checks = { size, cooldown: null, noRedraw: null };
+    behaviorReports.push(checks);
     let finished = false;
 
     for (let step = 0; step < 4000; step++) {
@@ -335,6 +402,10 @@ async function run(browser, url, { name: size, full = false, ...contextOptions }
       const drawButton = page.locator('.draw-button');
       if ((await drawButton.count()) && (await page.locator('.card--back').count()) === 5) {
         if (await drawButton.isEnabled()) {
+          if (!checks.cooldown) {
+            checks.cooldown = await checkDrawCooldown(page, drawButton);
+            continue;
+          }
           await drawButton.click();
           await page.clock.runFor(60);
           continue;
@@ -346,7 +417,7 @@ async function run(browser, url, { name: size, full = false, ...contextOptions }
       const previews = page.locator('button.preview');
       if (await previews.count()) {
         if (!shots.player) {
-          await page.locator('button.card').first().click(); // uma carta trancada
+          checks.noRedraw = await checkLockKeepsTable(page); // termina com uma carta trancada
           await shoot(page, 'table-player', size);
           await checkTips(page, size, touch);
           shots.player = true;
@@ -402,6 +473,16 @@ function printSummary() {
   );
   for (const t of tipReports) {
     console.log(`dica ${t.size}: ${t.checked} categorias,`, t.problems.length ? `problemas: ${t.problems.join('; ')}` : 'ok');
+  }
+  for (const b of behaviorReports) {
+    const cd = b.cooldown;
+    const nr = b.noRedraw;
+    console.log(
+      `${b.size}: clique duplo em "Tirar cartas" →`,
+      cd ? `${cd.ok ? 'ok' : 'FALHOU'} (${cd.label}, ${cd.deck}, bloqueado: ${cd.blocked}, liberado depois: ${cd.released})` : '—',
+      '| trancar sem redesenhar a tabela →',
+      nr ? `${nr.ok ? 'ok' : 'FALHOU'} (mesma tabela: ${nr.sameTable}, células animando: ${nr.animating})` : '—',
+    );
   }
 }
 

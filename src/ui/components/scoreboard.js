@@ -27,6 +27,8 @@ export function seatBadge(seat, name) {
  * - `showPreview`: mostra a prévia só para leitura (vez do NPC).
  * - `highlight`: categoria do jogador da vez a destacar (escolha do NPC).
  * - `handPoints`: pontos da mão atual por categoria (dica "Sua mão agora"), ou null.
+ * - `animateLast`: destaca (anima) a última célula marcada. A mesa passa true
+ *   só no 1º desenho depois de marcar, para a animação não reiniciar.
  *
  * O nome de cada categoria é um botão com a dica (components/categoryTip.js);
  * o texto da dica para leitores de tela fica fora da tabela, escondido, e é
@@ -39,6 +41,7 @@ export function renderScoreboard({
   showPreview = false,
   highlight = null,
   handPoints = null,
+  animateLast = false,
   onScore,
 }) {
   const idPrefix = `cat-desc-${++renderCount}`;
@@ -46,7 +49,8 @@ export function renderScoreboard({
   const current = getCurrentPlayer(state);
   const options = interactive || showPreview ? getScoreOptions(state) : {};
   const totals = getTotals(state);
-  const last = state.lastScored;
+  // a célula recém-marcada só anima quando pedido (uma vez, logo depois de marcar)
+  const last = animateLast ? state.lastScored : null;
 
   const headCell = (player) =>
     h(

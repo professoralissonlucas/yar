@@ -213,8 +213,13 @@ p {
   font-weight: 800;
 }
 
-/* rosto do personagem num círculo (background vem de faceStyle) */
-.seat-face {
+/*
+ * Rosto do personagem num círculo com borda dourada. O background vem de
+ * faceStyle (characters.js → faceCrop), calculado para o tamanho externo:
+ * por isso background-origin: border-box (a borda fica por cima do recorte).
+ */
+.seat-face,
+.option__face {
   display: inline-block;
   flex: 0 0 auto;
   width: 32px;
@@ -222,7 +227,14 @@ p {
   border: 2px solid var(--gold);
   border-radius: 50%;
   background-color: #2a5a48;
+  background-origin: border-box;
   background-repeat: no-repeat;
+}
+
+.option__face {
+  width: 56px;
+  height: 56px;
+  border-width: 3px;
 }
 
 /* ---------- botões ---------- */
@@ -463,12 +475,6 @@ p {
 
 .option--disabled .option__media--icon {
   color: var(--muted);
-}
-
-.option__portrait {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
 }
 
 .option__text {
@@ -724,7 +730,49 @@ p {
 }
 
 .draw-button {
+  position: relative;
   min-width: 240px;
+  overflow: hidden;
+}
+
+.draw-button__label {
+  position: relative;
+}
+
+/*
+ * Cooldown depois de tirar (table.js): parece desabilitado, ignora cliques e
+ * mostra um preenchimento rápido de progresso na base do botão.
+ */
+.btn--primary.draw-button--cooldown,
+.btn--primary.draw-button--cooldown:hover {
+  background: var(--gold);
+  cursor: progress;
+  opacity: 0.55;
+}
+
+.draw-button--cooldown:active {
+  transform: none;
+}
+
+.draw-button--cooldown::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 4px;
+  background: rgba(36, 26, 3, 0.55);
+  transform-origin: left center;
+  animation: draw-cooldown var(--cooldown-ms, 700ms) linear forwards;
+}
+
+@keyframes draw-cooldown {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
 }
 
 .deck-count {

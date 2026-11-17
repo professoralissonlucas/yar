@@ -1,6 +1,6 @@
 import { NPCS } from '../../ai/index.js';
 import { MODES } from '../../core/modes.js';
-import { ALISHOW } from '../characters.js';
+import { ALISHOW, faceStyle } from '../characters.js';
 import { h } from '../dom.js';
 import { categoryName, pluralize, stars } from '../texts.js';
 
@@ -8,6 +8,7 @@ export const NAME_MAX_LENGTH = 16;
 export const DEFAULT_NAMES = ['Jogador 1', 'Jogador 2'];
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
+const FACE_OPTION_PX = 56;
 
 /** Ícone de traço simples (24×24). `shapes` = [[tag, atributos], …]. */
 function icon(shapes) {
@@ -56,7 +57,8 @@ const MATCH_TYPES = [
       h(
         'span',
         { class: 'option__media' },
-        h('img', { class: 'option__portrait', src: ALISHOW.images.neutral, alt: '', draggable: 'false' }),
+        // mesma miniatura do rosto da tabela (characters.js → faceCrop)
+        h('span', { class: 'option__face', style: faceStyle(ALISHOW, FACE_OPTION_PX), 'aria-hidden': 'true' }),
       ),
     enabled: true,
   },

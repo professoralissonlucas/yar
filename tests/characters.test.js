@@ -6,6 +6,7 @@ import {
   getCharacter,
   pickLine,
   poseForReaction,
+  poseImageStyle,
   reactToOpponentScore,
   reactToOwnDraw,
   reactToOwnScore,
@@ -47,11 +48,35 @@ describe('Prof. Alishow', () => {
     expect(ALISHOW.lines.taunt).toEqual(['Zerou? Recuperação pra você!', 'Faltou estudar, hein?']);
   });
 
-  it('recorte do rosto gera um background posicionado', () => {
-    const style = faceStyle(ALISHOW, 32);
+  it('recorte do rosto (faceCrop, px da imagem) cabe na imagem', () => {
+    const { x, y, size } = ALISHOW.faceCrop;
+    expect(x).toBeGreaterThanOrEqual(0);
+    expect(y).toBeGreaterThanOrEqual(0);
+    expect(x + size).toBeLessThanOrEqual(ALISHOW.imageSize.width);
+    expect(y + size).toBeLessThanOrEqual(ALISHOW.imageSize.height);
+  });
+
+  it('miniatura: o quadrado do faceCrop ocupa exatamente a miniatura', () => {
+    const character = { ...ALISHOW, faceCrop: { x: 100, y: 20, size: 200 } };
+    const style = faceStyle(character, 50); // 0,25 px por px da imagem
     expect(style.backgroundImage).toContain('neutral');
-    expect(style.backgroundSize).toMatch(/px .*px/);
-    expect(style.backgroundPosition).toMatch(/px .*px/);
+    expect(style.backgroundSize).toBe('108px 144.5px');
+    expect(style.backgroundPosition).toBe('-25px -5px');
+  });
+
+  it('enquadramento por pose: inteira por padrão; thinking amplia sem sair da imagem', () => {
+    expect(poseImageStyle(ALISHOW, 'neutral')).toEqual({ width: '100%', left: '0%', top: '0%' });
+    const { width, height } = ALISHOW.imageSize;
+    const crop = ALISHOW.framing.thinking;
+    expect(crop.x + crop.width).toBeLessThanOrEqual(width);
+    expect(crop.y + (crop.width * height) / width).toBeLessThanOrEqual(height);
+    const style = poseImageStyle(ALISHOW, 'thinking');
+    expect(parseFloat(style.width)).toBeGreaterThan(150);
+    expect(parseFloat(style.left)).toBeLessThan(0);
+    expect(parseFloat(style.top)).toBeLessThan(0);
+    // recorte simples: metade da largura a partir do canto → 200%, deslocado
+    const half = { ...ALISHOW, framing: { happy: { x: 216, y: 0, width: 216 } } };
+    expect(poseImageStyle(half, 'happy')).toEqual({ width: '200%', left: '-100%', top: '0%' });
   });
 });
 

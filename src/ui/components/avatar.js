@@ -9,7 +9,7 @@
  * `figure` e `speech` são elementos separados para o layout posicioná-los.
  */
 
-import { CHARACTER_TIMING, pickLine, poseForReaction } from '../characters.js';
+import { CHARACTER_TIMING, pickLine, poseForReaction, poseImageStyle } from '../characters.js';
 import { h } from '../dom.js';
 
 const POSE_LABELS = {
@@ -67,8 +67,11 @@ export function createAvatar(
       alt: `${character.name} ${POSE_LABELS[next] ?? ''}`.trim(),
       draggable: 'false',
     });
-    const scale = character.framing?.[next]?.scale;
-    if (scale) img.style.setProperty('--avatar-scale', String(scale));
+    // enquadramento da pose (characters.js → framing): mesma cabeça em todas
+    const frame = poseImageStyle(character, next);
+    img.style.width = frame.width;
+    img.style.left = frame.left;
+    img.style.top = frame.top;
 
     const previous = [...stack.children];
     stack.append(img);
