@@ -186,6 +186,83 @@ export function rematchGame(room) {
   return createGame({ modeId: room.mode, players: ordered });
 }
 
+// ------------------------------------------------------------------
+// Gravações: o objeto exato que cada ação passa ao tx.update/updateDoc.
+// `now` é o horário do servidor (serverTimestamp() no Firebase) e
+// `expireAt` o vencimento (Timestamp de agora + 24 h). Ficam aqui, puras,
+// para os testes das regras (tests/rules/) gravarem o mesmo que o cliente.
+// ------------------------------------------------------------------
+
+/** Entrar como convidado. */
+export function joinPayload({ uid, name, now, expireAt }) {
+  return {
+    guestUid: uid,
+    [`players.${uid}`]: { name },
+    [`presence.${uid}`]: now,
+    updatedAt: now,
+    expireAt,
+  };
+}
+
+/** Começar a 1ª partida com o jogo `game` (estado do core). */
+export function startPayload(room, { uid, game, now, expireAt }) {
+  return {
+    status: 'playing',
+    game: toGameDoc(game),
+    rev: room.rev + 1,
+    match: 1,
+    [`presence.${uid}`]: now,
+    updatedAt: now,
+    expireAt,
+  };
+}
+
+/** Jogada (cadeado, tirada ou marcação) do jogador da vez. */
+export function movePayload({ uid, state, expectedRev, now, expireAt }) {
+  return {
+    game: toGameDoc(state),
+    rev: expectedRev + 1,
+    status: state.status === 'finished' ? 'finished' : 'playing',
+    [`presence.${uid}`]: now,
+    updatedAt: now,
+    expireAt,
+  };
+}
+
+/** Voto de revanche; se o outro já votou, recomeça com `rematchGame`. */
+export function rematchPayload(room, { uid, now, expireAt }) {
+  const vote = {
+    [`rematch.${uid}`]: room.match,
+    [`presence.${uid}`]: now,
+    updatedAt: now,
+  };
+  if (!rematchInfo(room, uid).theirs) return vote;
+  return {
+    ...vote,
+    status: 'playing',
+    game: toGameDoc(rematchGame(room)),
+    rev: room.rev + 1,
+    match: room.match + 1,
+    forfeitUid: null,
+    expireAt,
+  };
+}
+
+/** Encerrar por abandono do outro. */
+export function forfeitPayload(room, { uid, now }) {
+  return {
+    status: 'finished',
+    forfeitUid: otherUid(room, uid),
+    [`presence.${uid}`]: now,
+    updatedAt: now,
+  };
+}
+
+/** Sinal de vida. */
+export function heartbeatPayload({ uid, now }) {
+  return { [`presence.${uid}`]: now };
+}
+
 /** Votos de revanche da partida atual. */
 export function rematchInfo(room, uid) {
   const votes = room.rematch ?? {};

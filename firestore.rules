@@ -13,6 +13,16 @@ rules_version = '2';
 // dentro da faixa da categoria), mas não provam que o embaralhamento foi
 // honesto nem que os pontos são exatamente os da mão.
 //
+// LIMITE DO FIRESTORE: no máximo 1000 expressões avaliadas por gravação (acima
+// disso a gravação é recusada com permission-denied). Por isso:
+//   - a sala antes/depois e os campos alterados são lidos UMA vez e passados
+//     como parâmetro (s = antes, n = depois, ch = campos alterados);
+//   - cada gravação é despachada cedo para UMA ação (pelo `rev` e pelo status
+//     da sala; dentro da partida, pelo `drawsUsed`), em vez de testar todas;
+//   - "o resto não mudou" é conferido com diff() em vez de campo a campo.
+// Os testes no emulador (npm run test:rules) incluem uma folga: todas as
+// jogadas legítimas precisam passar mesmo com expressões extras somadas.
+//
 // Espelho em JavaScript destas regras de jogada (usado só nos testes):
 // tests/online/rulesMirror.js — mantenha os dois iguais.
 
@@ -66,51 +76,16 @@ service cloud.firestore {
         return ['deck', 'hand', 'locked', 'drawsUsed'];
       }
 
+      // Turno vazio (antes da 1ª tirada e depois de marcar).
+      function emptyTurn() {
+        return { 'deck': [], 'hand': [], 'locked': [false, false, false, false, false], 'drawsUsed': 0 };
+      }
+
       // ======================================================= auxiliares
 
       // Usuário logado (Google ou convidado/anônimo).
       function signedIn() {
         return request.auth != null;
-      }
-
-      function me() {
-        return request.auth.uid;
-      }
-
-      // Sala como está gravada (antes) e como ficaria depois da gravação.
-      function stored() {
-        return resource.data;
-      }
-
-      function incoming() {
-        return request.resource.data;
-      }
-
-      function isHost() {
-        return stored().hostUid == me();
-      }
-
-      function isGuest() {
-        return stored().guestUid == me();
-      }
-
-      // Membros da sala: o anfitrião e o convidado.
-      function isMember() {
-        return isHost() || isGuest();
-      }
-
-      // O outro jogador da sala.
-      function opponent() {
-        return isHost() ? stored().guestUid : stored().hostUid;
-      }
-
-      // Campos de primeiro nível que a gravação altera (adiciona, muda ou apaga).
-      function changed() {
-        return incoming().diff(stored()).affectedKeys();
-      }
-
-      function onlyChanged(keys) {
-        return changed().hasOnly(keys);
       }
 
       // Apelido: texto de 1 a 16 caracteres.
@@ -125,58 +100,33 @@ service cloud.firestore {
 
       // Validade da sala (TTL): agora + 24 h, aceitando de 12 h a 36 h por causa
       // do relógio do aparelho, que pode estar um pouco errado.
-      function expireAtOk() {
-        return incoming().expireAt is timestamp &&
-          incoming().expireAt > request.time + duration.value(12, 'h') &&
-          incoming().expireAt < request.time + duration.value(36, 'h');
+      function expireAtOk(n) {
+        return n.expireAt is timestamp &&
+          n.expireAt > request.time + duration.value(12, 'h') &&
+          n.expireAt < request.time + duration.value(36, 'h');
       }
 
       // Sala ainda válida (salas antigas sem expireAt: updatedAt + 24 h).
-      function notExpired() {
-        return request.time < stored().get('expireAt', stored().updatedAt + duration.value(24, 'h'));
+      function notExpired(s) {
+        return request.time < s.get('expireAt', s.updatedAt + duration.value(24, 'h'));
       }
 
-      // =========================================== validação do estado do jogo
-
-      // Mão, cadeados e baralho de um turno: tipos e tamanhos.
-      // Antes da 1ª tirada: tudo vazio e destrancado. Depois: 5 cartas de 1 a 6,
-      // 5 cadeados (booleanos), baralho só com cartas de 1 a 6 e no máximo 31.
-      function turnOk(g) {
-        let t = g.turn;
-        return t.keys().hasOnly(turnKeys()) && t.keys().hasAll(turnKeys()) &&
-          t.drawsUsed is int &&
-          t.hand is list && t.hand.hasOnly([1, 2, 3, 4, 5, 6]) &&
-          t.deck is list && t.deck.hasOnly([1, 2, 3, 4, 5, 6]) &&
-          t.locked is list && t.locked.size() == 5 && t.locked.hasOnly([true, false]) &&
-          (
-            (t.drawsUsed == 0 && t.hand.size() == 0 && t.deck.size() == 0 && t.locked.hasOnly([false])) ||
-            (t.drawsUsed >= 1 && t.drawsUsed <= g.maxDraws && t.hand.size() == 5 && t.deck.size() <= 31)
-          );
+      // O outro membro da sala (para quem é membro).
+      function opponentOf(s) {
+        return s.hostUid == request.auth.uid ? s.guestUid : s.hostUid;
       }
 
-      // Última marcação: null ou { playerId, categoryId, points } com points inteiro.
-      function lastScoredOk(g) {
-        return g.lastScored == null || (
-          g.lastScored.keys().hasOnly(['playerId', 'categoryId', 'points']) &&
-          g.lastScored.keys().hasAll(['playerId', 'categoryId', 'points']) &&
-          g.lastScored.playerId is string &&
-          g.lastScored.categoryId is string &&
-          g.lastScored.points is int
-        );
+      // 5 cartas de 1 a 6.
+      function handOk(hand) {
+        return hand is list && hand.size() == 5 && hand.hasOnly([1, 2, 3, 4, 5, 6]);
       }
 
-      // Forma geral do `game`: só os campos do core (+ currentUid), 2 jogadores,
-      // vez coerente com currentUid, status conhecido.
-      function gameShapeOk(g) {
-        return g.keys().hasOnly(gameKeys()) && g.keys().hasAll(gameKeys()) &&
-          g.players is list && g.players.size() == 2 &&
-          g.currentPlayerIndex is int && g.currentPlayerIndex in [0, 1] &&
-          g.currentUid == g.players[g.currentPlayerIndex].id &&
-          g.round is int && g.round >= 0 &&
-          g.status in ['playing', 'finished'] &&
-          turnOk(g) &&
-          lastScoredOk(g);
+      // 5 cadeados (booleanos).
+      function locksOk(locked) {
+        return locked is list && locked.size() == 5 && locked.hasOnly([true, false]);
       }
+
+      // ==================================================== partida nova
 
       // Placar de uma partida nova: exatamente as categorias do modo, todas vazias.
       function freshScores(scores, cats) {
@@ -184,265 +134,260 @@ service cloud.firestore {
       }
 
       // Jogador no `game`: { id, name } com o mesmo apelido gravado na sala.
-      function gamePlayerOk(p) {
-        return p.keys().hasOnly(['id', 'name']) && p.id in [stored().hostUid, stored().guestUid] &&
-          p.name == stored().players[p.id].name;
+      function gamePlayerOk(s, p) {
+        return p.keys().hasOnly(['id', 'name']) && p.id in [s.hostUid, s.guestUid] &&
+          p.name == s.players[p.id].name;
       }
 
-      // Partida nova (começar ou revanche): modo da sala, tiradas e categorias do
-      // modo, baralho de 6 cópias por valor, os dois membros como jogadores, turno
-      // vazio, rodada 0, vez do primeiro jogador e todas as categorias vazias.
-      function newGameOk(g) {
-        let mode = modes()[stored().mode];
-        let host = stored().hostUid;
-        let guest = stored().guestUid;
-        return gameShapeOk(g) &&
-          g.modeId == stored().mode &&
+      // Partida nova (começar ou revanche), conferida contra a sala ANTES (s):
+      // só os campos do core (+ currentUid), modo da sala, tiradas e categorias
+      // do modo, baralho de 6 cópias por valor, os dois membros como jogadores,
+      // vez do primeiro, rodada 0, turno vazio e todas as categorias vazias.
+      // `mode` = { draws, cats }: ao começar, vem da tabela modes(); na
+      // revanche, do game anterior (que já foi conferido contra a tabela ao
+      // começar e cujos campos fixos nunca mudam) — montar a tabela inteira
+      // custa ~100 expressões.
+      function newGameOk(s, g, mode) {
+        let host = s.hostUid;
+        let guest = s.guestUid;
+        return g.keys().hasOnly(gameKeys()) && g.keys().hasAll(gameKeys()) &&
+          g.modeId == s.mode &&
           g.maxDraws == mode.draws &&
           g.categories == mode.cats &&
           g.deckCopiesPerValue == 6 &&
-          gamePlayerOk(g.players[0]) && gamePlayerOk(g.players[1]) &&
+          g.players is list && g.players.size() == 2 &&
+          gamePlayerOk(s, g.players[0]) && gamePlayerOk(s, g.players[1]) &&
           g.players[0].id != g.players[1].id &&
           g.currentPlayerIndex == 0 &&
+          g.currentUid == g.players[0].id &&
           g.round == 0 &&
           g.status == 'playing' &&
-          g.turn.drawsUsed == 0 &&
+          g.turn == emptyTurn() &&
           g.lastScored == null &&
           g.scores.keys().hasOnly([host, guest]) && g.scores.keys().hasAll([host, guest]) &&
           freshScores(g.scores[host], mode.cats) &&
           freshScores(g.scores[guest], mode.cats);
       }
 
-      // Durante a partida, nunca mudam: modo, limite de tiradas, categorias,
-      // tamanho do baralho, jogadores e quais jogadores têm placar.
-      function gameFixedKept(s, n) {
-        return n.modeId == s.modeId &&
-          n.maxDraws == s.maxDraws &&
-          n.categories == s.categories &&
-          n.deckCopiesPerValue == s.deckCopiesPerValue &&
-          n.players == s.players &&
-          n.scores.keys().hasOnly(s.scores.keys()) && n.scores.keys().hasAll(s.scores.keys());
-      }
+      // ================================================ jogadas da partida
+      // s = game gravado, n = game novo. O game gravado já é válido (foi
+      // conferido quando gravado), então basta conferir o que muda.
 
-      // Mesmo turno do mesmo jogador, placar intacto (cadeado ou tirada).
-      function sameTurn(s, n) {
-        return n.currentPlayerIndex == s.currentPlayerIndex &&
-          n.round == s.round &&
-          n.status == 'playing' &&
-          n.scores == s.scores &&
-          n.lastScored == s.lastScored;
-      }
-
-      // Quantas cartas não estão trancadas (são as que a próxima tirada troca).
-      function unlockedCount(t) {
-        return (t.locked[0] ? 0 : 1) + (t.locked[1] ? 0 : 1) + (t.locked[2] ? 0 : 1) +
-          (t.locked[3] ? 0 : 1) + (t.locked[4] ? 0 : 1);
-      }
-
-      // Carta trancada continua igual depois da tirada.
-      function keptIfLocked(s, n, i) {
-        return !s.turn.locked[i] || n.turn.hand[i] == s.turn.hand[i];
-      }
-
-      // JOGADA "CADEADO": já tirou, só os cadeados mudam (mão e baralho iguais).
-      function lockMove(s, n) {
-        return sameTurn(s, n) &&
-          s.turn.drawsUsed >= 1 &&
-          n.turn.drawsUsed == s.turn.drawsUsed &&
-          n.turn.hand == s.turn.hand &&
-          n.turn.deck == s.turn.deck;
-      }
-
-      // JOGADA "TIRADA": drawsUsed sobe exatamente 1, sem passar do limite do modo.
-      // 1ª tirada: 5 cartas, nada trancado, baralho com 36 − 5 = 31.
-      // Demais: cadeados iguais, cartas trancadas iguais, pelo menos uma carta
-      // trocada e o baralho encolhe exatamente o número de cartas trocadas.
-      function drawMove(s, n) {
-        return sameTurn(s, n) &&
-          n.turn.drawsUsed == s.turn.drawsUsed + 1 &&
-          n.turn.drawsUsed <= n.maxDraws &&
-          (s.turn.drawsUsed == 0 ? firstDraw(n) : redraw(s, n));
-      }
-
-      function firstDraw(n) {
-        return n.turn.hand.size() == 5 &&
-          n.turn.locked.hasOnly([false]) &&
-          n.turn.deck.size() == n.deckCopiesPerValue * 6 - 5;
-      }
-
-      function redraw(s, n) {
-        let replaced = unlockedCount(s.turn);
-        return n.turn.locked == s.turn.locked &&
-          replaced >= 1 &&
-          keptIfLocked(s, n, 0) && keptIfLocked(s, n, 1) && keptIfLocked(s, n, 2) &&
-          keptIfLocked(s, n, 3) && keptIfLocked(s, n, 4) &&
-          n.turn.deck.size() == s.turn.deck.size() - replaced;
-      }
-
-      // Todas as categorias dos dois jogadores preenchidas?
-      function allFilled(scores, a, b) {
-        return !(null in scores[a].values()) && !(null in scores[b].values());
-      }
-
-      // JOGADA "MARCAÇÃO": precisa ter tirado; preenche UMA categoria VAZIA do
-      // próprio jogador, com valor inteiro dentro da faixa da categoria (igual a
-      // lastScored.points); o placar do outro e as categorias já marcadas não
-      // mudam; o turno volta a vazio; a vez passa ao outro — ou, se todo mundo
-      // preencheu tudo, a partida termina e a vez fica onde estava.
-      function scoreMove(s, n) {
-        return s.turn.drawsUsed >= 1 &&
-          n.lastScored != null &&
-          scoreDetails(s, n, s.players[s.currentPlayerIndex].id, s.players[1 - s.currentPlayerIndex].id,
-            n.lastScored.categoryId, n.lastScored.points);
-      }
-
-      function scoreDetails(s, n, player, other, cat, points) {
-        return n.lastScored.playerId == player &&
-          cat in n.categories &&
-          s.scores[player][cat] == null &&
-          n.scores[player].diff(s.scores[player]).affectedKeys().hasOnly([cat]) &&
-          n.scores[player][cat] == points &&
-          points >= catRange()[cat][0] && points <= catRange()[cat][1] &&
-          n.scores[other] == s.scores[other] &&
-          n.turn.drawsUsed == 0 &&
-          (
-            allFilled(n.scores, player, other)
-              ? (n.status == 'finished' && n.currentPlayerIndex == s.currentPlayerIndex && n.round == s.round)
-              : (n.status == 'playing' && n.currentPlayerIndex == 1 - s.currentPlayerIndex &&
-                 n.round == (n.currentPlayerIndex == 0 ? s.round + 1 : s.round))
-          );
-      }
-
-      // Uma jogada válida = forma ok + campos fixos + um dos três tipos acima.
+      // Qual jogada é: pelo drawsUsed novo. 0 → marcação (o turno volta a
+      // vazio); igual ao anterior → cadeado; senão → tirada.
       function validMove(s, n) {
-        return gameShapeOk(n) && gameFixedKept(s, n) &&
-          (lockMove(s, n) || drawMove(s, n) || scoreMove(s, n));
+        return s.status == 'playing' &&
+          (n.turn.drawsUsed == 0
+            ? scoreMove(s, n)
+            : (n.turn.drawsUsed == s.turn.drawsUsed ? lockMove(s, n) : drawMove(s, n)));
       }
 
-      // ============================================= regras que valem sempre
+      // CADEADO: no game só o turno muda, e no turno só os cadeados
+      // (mão, baralho e tiradas iguais). drawsUsed ≥ 1 vem do despacho.
+      function lockMove(s, n) {
+        return n.diff(s).affectedKeys().hasOnly(['turn']) &&
+          n.turn.diff(s.turn).affectedKeys().hasOnly(['locked']) &&
+          locksOk(n.turn.locked);
+      }
+
+      // TIRADA: no game só o turno muda; drawsUsed sobe exatamente 1, sem
+      // passar do limite do modo; 5 cartas de 1 a 6.
+      function drawMove(s, n) {
+        let t = n.turn;
+        return n.diff(s).affectedKeys().hasOnly(['turn']) &&
+          t.diff(s.turn).affectedKeys().hasOnly(turnKeys()) &&
+          t.drawsUsed == s.turn.drawsUsed + 1 &&
+          t.drawsUsed <= s.maxDraws &&
+          handOk(t.hand) &&
+          t.deck is list && t.deck.hasOnly([1, 2, 3, 4, 5, 6]) &&
+          (s.turn.drawsUsed == 0 ? firstDraw(s, t) : redraw(s.turn, t));
+      }
+
+      // 1ª tirada: nada trancado, baralho com 36 − 5 = 31.
+      function firstDraw(s, t) {
+        return t.locked == [false, false, false, false, false] &&
+          t.deck.size() == s.deckCopiesPerValue * 6 - 5;
+      }
+
+      // Demais tiradas: cadeados iguais, cartas trancadas iguais, pelo menos
+      // uma carta trocada e o baralho encolhe exatamente o número de trocadas.
+      function redraw(st, t) {
+        let l = st.locked;
+        let replaced = (l[0] ? 0 : 1) + (l[1] ? 0 : 1) + (l[2] ? 0 : 1) + (l[3] ? 0 : 1) + (l[4] ? 0 : 1);
+        return t.locked == l &&
+          replaced >= 1 &&
+          (!l[0] || t.hand[0] == st.hand[0]) &&
+          (!l[1] || t.hand[1] == st.hand[1]) &&
+          (!l[2] || t.hand[2] == st.hand[2]) &&
+          (!l[3] || t.hand[3] == st.hand[3]) &&
+          (!l[4] || t.hand[4] == st.hand[4]) &&
+          t.deck.size() == st.deck.size() - replaced;
+      }
+
+      // MARCAÇÃO: precisa ter tirado; preenche UMA categoria VAZIA do jogador
+      // da vez, com valor inteiro dentro da faixa da categoria (igual a
+      // lastScored.points); o placar do outro, as categorias já marcadas e os
+      // campos fixos (modo, jogadores…) não mudam; o turno volta a vazio; a vez
+      // passa ao outro — ou, se todo mundo preencheu tudo, a partida termina e
+      // a vez fica onde estava.
+      function scoreMove(s, n) {
+        let player = s.currentUid;
+        let other = s.players[1 - s.currentPlayerIndex].id;
+        let last = n.lastScored;
+        let cat = last.categoryId;
+        let range = catRange()[cat];
+        return s.turn.drawsUsed >= 1 &&
+          n.diff(s).affectedKeys().hasOnly(['scores', 'turn', 'currentPlayerIndex', 'round', 'status',
+            'lastScored', 'currentUid']) &&
+          n.turn == emptyTurn() &&
+          last.keys().hasOnly(['playerId', 'categoryId', 'points']) &&
+          last.playerId == player &&
+          cat in s.categories &&
+          last.points is int && last.points >= range[0] && last.points <= range[1] &&
+          s.scores[player][cat] == null &&
+          n.scores.diff(s.scores).affectedKeys().hasOnly([player]) &&
+          n.scores[player].diff(s.scores[player]).affectedKeys().hasOnly([cat]) &&
+          n.scores[player][cat] == last.points &&
+          n.currentUid == n.players[n.currentPlayerIndex].id &&
+          turnPassed(s, n, !(null in n.scores[player].values()) && !(null in n.scores[other].values()));
+      }
+
+      function turnPassed(s, n, allFilled) {
+        return allFilled
+          ? (n.status == 'finished' && n.currentPlayerIndex == s.currentPlayerIndex && n.round == s.round)
+          : (n.status == 'playing' && n.currentPlayerIndex == 1 - s.currentPlayerIndex &&
+             n.round == (n.currentPlayerIndex == 0 ? s.round + 1 : s.round));
+      }
+
+      // ===================================== conferências de toda gravação
+      // s = sala antes, n = sala depois, ch = campos de 1º nível alterados.
 
       // hostUid, guestUid, players (apelidos), mode, timerEnabled e createdAt
       // nunca mudam depois de criados. (O guestUid é preenchido uma única vez,
       // quando o amigo entra — isso é tratado em joining(), separado.)
-      function fixedFieldsKept() {
-        return !changed().hasAny(['hostUid', 'guestUid', 'players', 'mode', 'timerEnabled', 'createdAt']);
+      function fixedFieldsKept(ch) {
+        return !ch.hasAny(['hostUid', 'guestUid', 'players', 'mode', 'timerEnabled', 'createdAt']);
       }
 
       // Presença (lastSeen): cada jogador só altera a PRÓPRIA chave, e sempre
       // com o horário do servidor (serverTimestamp), para ninguém falsificar.
-      function presenceOk() {
-        return !changed().hasAny(['presence']) || (
-          incoming().presence.diff(stored().presence).affectedKeys().hasOnly([me()]) &&
-          incoming().presence[me()] == request.time
+      function presenceOk(s, n, ch) {
+        return !ch.hasAny(['presence']) || (
+          n.presence.diff(s.presence).affectedKeys().hasOnly([request.auth.uid]) &&
+          n.presence[request.auth.uid] == request.time
         );
       }
 
       // Voto de revanche: cada jogador só altera o PRÓPRIO voto, e o voto vale
       // para a partida atual (rematch[uid] == match).
-      function rematchOk() {
-        return !changed().hasAny(['rematch']) || (
-          incoming().rematch.diff(stored().rematch).affectedKeys().hasOnly([me()]) &&
-          incoming().rematch[me()] == stored().match
+      function rematchOk(s, n, ch) {
+        return !ch.hasAny(['rematch']) || (
+          n.rematch.diff(s.rematch).affectedKeys().hasOnly([request.auth.uid]) &&
+          n.rematch[request.auth.uid] == s.match
         );
       }
 
       // updatedAt só pode receber o horário do servidor; expireAt, se mudar,
       // tem que ser "agora + 24 h".
-      function timesOk() {
-        return (!changed().hasAny(['updatedAt']) || incoming().updatedAt == request.time) &&
-          (!changed().hasAny(['expireAt']) || expireAtOk());
-      }
-
-      // Toda gravação que muda o jogo sobe o contador rev em EXATAMENTE 1
-      // (duas gravações baseadas no mesmo estado não passam as duas).
-      function revBumped() {
-        return incoming().rev is int && incoming().rev == stored().rev + 1;
+      function timesOk(n, ch) {
+        return (!ch.hasAny(['updatedAt']) || n.updatedAt == request.time) &&
+          (!ch.hasAny(['expireAt']) || expireAtOk(n));
       }
 
       // ================================================== ações permitidas
 
+      // Gravação de quem já é membro: as conferências gerais e UMA ação.
+      // Toda gravação que muda o jogo sobe o rev em EXATAMENTE 1 (duas
+      // gravações baseadas no mesmo estado não passam as duas) — e só elas
+      // mexem no rev. Sem rev: sinal de vida, voto de revanche ou abandono.
+      function memberUpdate(s, n, ch) {
+        return fixedFieldsKept(ch) && presenceOk(s, n, ch) && rematchOk(s, n, ch) && timesOk(n, ch) &&
+          (ch.hasAny(['rev'])
+            ? (n.rev is int && n.rev == s.rev + 1 && gameWrite(s, n, ch))
+            : (ch.hasOnly(['presence']) || votingRematch(s, ch) || forfeiting(s, n, ch)));
+      }
+
+      // Gravações que mudam o jogo, pelo status da sala antes.
+      function gameWrite(s, n, ch) {
+        return s.status == 'waiting'
+          ? starting(s, n, ch)
+          : (s.status == 'playing' ? playingMove(s, n, ch) : restarting(s, n, ch));
+      }
+
       // ENTRAR: quem não é membro preenche guestUid com o próprio uid, só se a
       // vaga estava vazia, a sala está em espera e não expirou. Junto, só pode
       // gravar o próprio apelido, a própria presença e renovar o expireAt.
-      function joining() {
-        return !isMember() &&
-          stored().status == 'waiting' &&
-          stored().guestUid == null &&
-          notExpired() &&
-          onlyChanged(['guestUid', 'players', 'presence', 'updatedAt', 'expireAt']) &&
-          incoming().guestUid == me() &&
-          incoming().players.diff(stored().players).affectedKeys().hasOnly([me()]) &&
-          incoming().players[me()].keys().hasOnly(['name']) &&
-          validName(incoming().players[me()].name) &&
-          incoming().presence.diff(stored().presence).affectedKeys().hasOnly([me()]) &&
-          incoming().presence[me()] == request.time &&
-          incoming().updatedAt == request.time &&
-          timesOk();
-      }
-
-      // SINAL DE VIDA: membro atualiza só a própria presença.
-      function heartbeatOnly() {
-        return onlyChanged(['presence']);
+      function joining(s, n, ch) {
+        let me = request.auth.uid;
+        return s.status == 'waiting' &&
+          s.guestUid == null &&
+          notExpired(s) &&
+          ch.hasOnly(['guestUid', 'players', 'presence', 'updatedAt', 'expireAt']) &&
+          n.guestUid == me &&
+          n.players.diff(s.players).affectedKeys().hasOnly([me]) &&
+          n.players[me].keys().hasOnly(['name']) &&
+          validName(n.players[me].name) &&
+          n.presence.diff(s.presence).affectedKeys().hasOnly([me]) &&
+          n.presence[me] == request.time &&
+          n.updatedAt == request.time &&
+          timesOk(n, ch);
       }
 
       // COMEÇAR: só o anfitrião, com a sala em espera e o convidado presente.
-      // A sala passa a 'playing', partida nº 1, rev + 1, com um jogo novo válido.
-      function starting() {
-        return isHost() &&
-          stored().status == 'waiting' &&
-          stored().guestUid != null &&
-          onlyChanged(['status', 'game', 'rev', 'match', 'presence', 'updatedAt', 'expireAt']) &&
-          incoming().status == 'playing' &&
-          incoming().match == 1 &&
-          revBumped() &&
-          expireAtOk() &&
-          newGameOk(incoming().game);
+      // A sala passa a 'playing', partida nº 1, com um jogo novo válido.
+      function starting(s, n, ch) {
+        return s.hostUid == request.auth.uid &&
+          s.guestUid != null &&
+          ch.hasOnly(['status', 'game', 'rev', 'match', 'presence', 'updatedAt', 'expireAt']) &&
+          n.status == 'playing' &&
+          n.match == 1 &&
+          expireAtOk(n) &&
+          newGameOk(s, n.game, modes()[s.mode]);
       }
 
       // JOGADA: só quem é o currentUid ATUAL (antes da gravação) altera o game,
-      // com rev + 1, expireAt renovado e uma jogada válida (cadeado, tirada ou
+      // com expireAt renovado e uma jogada válida (cadeado, tirada ou
       // marcação). A sala só vira 'finished' junto com o fim do próprio game.
-      function playingMove() {
-        return stored().status == 'playing' &&
-          stored().game.currentUid == me() &&
-          onlyChanged(['game', 'rev', 'status', 'presence', 'updatedAt', 'expireAt']) &&
-          revBumped() &&
-          expireAtOk() &&
-          validMove(stored().game, incoming().game) &&
-          incoming().status == incoming().game.status;
-      }
-
-      // PEDIR REVANCHE: com a partida terminada, o membro grava só o próprio voto.
-      function votingRematch() {
-        return stored().status == 'finished' &&
-          onlyChanged(['rematch', 'presence', 'updatedAt']);
+      function playingMove(s, n, ch) {
+        return s.game.currentUid == request.auth.uid &&
+          ch.hasOnly(['game', 'rev', 'status', 'presence', 'updatedAt', 'expireAt']) &&
+          expireAtOk(n) &&
+          n.status == n.game.status &&
+          validMove(s.game, n.game);
       }
 
       // REVANCHE: com a partida terminada, quem vota por último recomeça — desde
-      // que o OUTRO já tenha votado nesta partida. Partida nº + 1, rev + 1, jogo
-      // novo válido, e o abandono anterior (se houve) é apagado.
-      function restarting() {
-        return stored().status == 'finished' &&
-          onlyChanged(['status', 'game', 'rev', 'match', 'rematch', 'forfeitUid', 'presence', 'updatedAt', 'expireAt']) &&
-          incoming().status == 'playing' &&
-          incoming().match == stored().match + 1 &&
-          revBumped() &&
-          expireAtOk() &&
-          newGameOk(incoming().game) &&
-          incoming().rematch[me()] == stored().match &&
-          incoming().rematch.get(opponent(), -1) == stored().match &&
-          incoming().forfeitUid == null;
+      // que o OUTRO já tenha votado nesta partida. Partida nº + 1, jogo novo
+      // válido, e o abandono anterior (se houve) é apagado.
+      function restarting(s, n, ch) {
+        return s.status == 'finished' &&
+          ch.hasOnly(['status', 'game', 'rev', 'match', 'rematch', 'forfeitUid', 'presence', 'updatedAt', 'expireAt']) &&
+          n.status == 'playing' &&
+          n.match == s.match + 1 &&
+          expireAtOk(n) &&
+          n.rematch[request.auth.uid] == s.match &&
+          n.rematch.get(opponentOf(s), -1) == s.match &&
+          n.forfeitUid == null &&
+          s.game.modeId == s.mode &&
+          newGameOk(s, n.game, { 'draws': s.game.maxDraws, 'cats': s.game.categories });
+      }
+
+      // PEDIR REVANCHE: com a partida terminada, o membro grava só o próprio
+      // voto (conferido em rematchOk).
+      function votingRematch(s, ch) {
+        return s.status == 'finished' && ch.hasOnly(['rematch', 'presence', 'updatedAt']);
       }
 
       // ABANDONO: durante a partida, um membro encerra se o OUTRO está sem sinal
       // de vida há mais de 2 minutos (conferido com o relógio do servidor). O
       // game não muda; forfeitUid aponta quem abandonou.
-      function forfeiting() {
-        return stored().status == 'playing' &&
-          onlyChanged(['status', 'forfeitUid', 'presence', 'updatedAt']) &&
-          incoming().status == 'finished' &&
-          incoming().forfeitUid == opponent() &&
-          request.time > stored().presence.get(opponent(), stored().updatedAt) + duration.value(2, 'm');
+      function forfeiting(s, n, ch) {
+        let other = opponentOf(s);
+        return s.status == 'playing' &&
+          ch.hasOnly(['status', 'forfeitUid', 'presence', 'updatedAt']) &&
+          n.status == 'finished' &&
+          n.forfeitUid == other &&
+          request.time > s.presence.get(other, s.updatedAt) + duration.value(2, 'm');
       }
 
       // ============================================================= regras
@@ -451,8 +396,12 @@ service cloud.firestore {
       // em espera, para quem tem o código conseguir entrar. Ler um código que
       // não existe (resource == null) é permitido: é assim que a tela diz "sala
       // não existe" e que a criação confere se o código está livre.
-      allow get: if signedIn() &&
-        (resource == null || isMember() || resource.data.status == 'waiting');
+      allow get: if signedIn() && (
+        resource == null ||
+        resource.data.hostUid == request.auth.uid ||
+        resource.data.guestUid == request.auth.uid ||
+        resource.data.status == 'waiting'
+      );
 
       // LISTAR a coleção: ninguém (não dá para descobrir códigos de outras salas).
       allow list: if false;
@@ -461,45 +410,42 @@ service cloud.firestore {
       // modo existente, vaga do convidado vazia, sala em espera, sem jogo,
       // contadores zerados, horários do servidor, expireAt = agora + 24 h e
       // exatamente os campos esperados.
-      allow create: if signedIn() &&
-        validCode() &&
-        incoming().keys().hasOnly(roomKeys()) &&
-        incoming().keys().hasAll(roomKeys()) &&
-        incoming().hostUid == me() &&
-        incoming().guestUid == null &&
-        incoming().players.keys().hasOnly([me()]) &&
-        incoming().players[me()].keys().hasOnly(['name']) &&
-        validName(incoming().players[me()].name) &&
-        incoming().mode in modes() &&
-        incoming().timerEnabled is bool &&
-        incoming().status == 'waiting' &&
-        incoming().game == null &&
-        incoming().rev == 0 &&
-        incoming().match == 0 &&
-        incoming().createdAt == request.time &&
-        incoming().updatedAt == request.time &&
-        expireAtOk() &&
-        incoming().presence.keys().hasOnly([me()]) &&
-        incoming().presence[me()] == request.time &&
-        incoming().rematch.size() == 0 &&
-        incoming().forfeitUid == null;
+      allow create: if signedIn() && validCode() && newRoomOk(request.resource.data, request.auth.uid);
 
-      // ATUALIZAR: sem campos extras; entrar na sala (não membro) ou — só
-      // membros — uma das ações acima, sempre respeitando os campos fixos, a
-      // presença própria, o voto próprio e os horários.
+      function newRoomOk(n, me) {
+        return n.keys().hasOnly(roomKeys()) &&
+          n.keys().hasAll(roomKeys()) &&
+          n.hostUid == me &&
+          n.guestUid == null &&
+          n.players.keys().hasOnly([me]) &&
+          n.players[me].keys().hasOnly(['name']) &&
+          validName(n.players[me].name) &&
+          n.mode in modes() &&
+          n.timerEnabled is bool &&
+          n.status == 'waiting' &&
+          n.game == null &&
+          n.rev == 0 &&
+          n.match == 0 &&
+          n.createdAt == request.time &&
+          n.updatedAt == request.time &&
+          expireAtOk(n) &&
+          n.presence.keys().hasOnly([me]) &&
+          n.presence[me] == request.time &&
+          n.rematch.size() == 0 &&
+          n.forfeitUid == null;
+      }
+
+      // ATUALIZAR: sem campos extras; quem é membro faz uma das ações acima
+      // (memberUpdate), quem não é só pode entrar (joining).
       allow update: if signedIn() &&
-        incoming().keys().hasOnly(roomKeys()) &&
-        (
-          joining() ||
-          (
-            isMember() &&
-            fixedFieldsKept() &&
-            presenceOk() &&
-            rematchOk() &&
-            timesOk() &&
-            (heartbeatOnly() || starting() || playingMove() || votingRematch() || restarting() || forfeiting())
-          )
-        );
+        request.resource.data.keys().hasOnly(roomKeys()) &&
+        roomUpdate(resource.data, request.resource.data, request.resource.data.diff(resource.data).affectedKeys());
+
+      function roomUpdate(s, n, ch) {
+        return (s.hostUid == request.auth.uid || s.guestUid == request.auth.uid)
+          ? memberUpdate(s, n, ch)
+          : joining(s, n, ch);
+      }
 
       // APAGAR pelo cliente: nunca. Salas vencidas (expireAt no passado) são
       // ignoradas pelo jogo e apagadas pela política de TTL do Firestore, se

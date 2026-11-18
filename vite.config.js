@@ -9,6 +9,8 @@ export default defineConfig({
   },
   test: {
     include: ['tests/**/*.test.js'],
+    // tests/rules/ precisa do emulador do Firestore: `npm run test:rules`
+    exclude: ['tests/rules/**', 'node_modules/**'],
     environment: 'node',
   },
 });

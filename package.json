@@ -9,11 +9,14 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-yar \"vitest run --config vitest.rules.config.js\"",
     "calibrate": "node scripts/calibrate.js",
     "tournament": "node scripts/tournament.js",
     "screenshots": "npm run build && node scripts/screenshots.js"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^6.0.0",
+    "firebase-tools": "^15.36.0",
     "playwright": "^1.65.1",
     "vite": "^8.3.8",
     "vitest": "^5.1.0"
