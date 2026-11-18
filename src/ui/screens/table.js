@@ -28,6 +28,7 @@ import { closeDialogs, confirmDialog, showTurnNotice } from '../components/dialo
 import { renderScoreboard } from '../components/scoreboard.js';
 import { createTurnTimer, formatSeconds } from '../components/turnTimer.js';
 import { h } from '../dom.js';
+import { describeRemoteChange } from '../remoteChange.js';
 import { categoryName, initialOf, stars } from '../texts.js';
 
 export const TURN_SECONDS = 45;
@@ -42,6 +43,8 @@ const NPC_PAUSE_MS = 700;
 const NPC_LOCK_STEP_MS = 280;
 const NPC_PICK_MS = 700;
 const NPC_AFTER_SCORE_MS = 900;
+/** Pausa depois da marcação do adversário online (para ver a célula). */
+const REMOTE_AFTER_SCORE_MS = 900;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -49,14 +52,33 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * Mesa de jogo. Toda regra vem de src/core/game.js; esta tela só guarda o
  * estado atual, chama as funções do core e redesenha.
  *
- * players: [{ id, name, controller: 'local' | 'npc', npcLevel?, character? }] — no futuro, 'online'.
+ * players: [{ id, name, controller: 'local' | 'npc' | 'remote', npcLevel?, character? }].
  * Um assento com `character` aparece como personagem (hoje: o Prof. Alishow,
  * que é a máquina); os outros aparecem só com o nome.
+ *
+ * Online (assento 'remote'): `initialState` é o estado vindo do servidor,
+ * `onLocalChange(state)` é chamado a cada mudança feita pelo jogador local
+ * (tirar, trancar, marcar, tempo esgotado) e `banner` vai no cabeçalho. A mesa
+ * devolve { applyRemote(state), resync(state), destroy() } para receber as
+ * jogadas do adversário.
  */
-export function showTable(root, { players, modeId, timerEnabled, onExit, onGameOver }) {
+export function showTable(
+  root,
+  {
+    players,
+    modeId,
+    timerEnabled,
+    onExit,
+    onGameOver,
+    initialState = null,
+    onLocalChange = null,
+    banner = null,
+    exitMessage = 'O progresso desta partida será perdido.',
+  },
+) {
   const rng = Math.random;
   const mode = getMode(modeId);
-  let state = createGame({ modeId, players: players.map(({ id, name }) => ({ id, name })) });
+  let state = initialState ?? createGame({ modeId, players: players.map(({ id, name }) => ({ id, name })) });
   let dealtIndices = new Set();
   let busy = true; // true enquanto um aviso está na tela ou o turno está mudando
   let destroyed = false;
@@ -66,6 +88,8 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
   let cooldownTimer = null; // "Tirar cartas" bloqueado enquanto as cartas chegam
   let scoring = false; // marcação em andamento (ignora cliques repetidos)
   let scoreAnimPending = false; // animar a célula recém-marcada no próximo desenho
+  let pendingRemote = null; // estado mais novo do adversário online, ainda não aplicado
+  let flow = 0; // cada troca de turno ganha um número; fluxos antigos param
 
   if (players.some((p) => p.controller === 'npc')) warmUp();
 
@@ -75,11 +99,15 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
   if (character) preloadCharacter(character);
   const avatar = character ? createAvatar(character, { caption: false }) : null;
 
-  // Lados da mesa: adversário em cima (a máquina, ou o jogador 2 no modo
-  // local) e o jogador embaixo.
-  const topSeat = players.find((p) => p.controller === 'npc') ?? players.find((p) => p.id === 'p2') ?? players[1];
+  // Lados da mesa: adversário em cima (a máquina, o amigo online ou o
+  // jogador 2 no modo local) e o jogador embaixo.
+  const topSeat =
+    players.find((p) => p.controller === 'npc') ??
+    players.find((p) => p.controller === 'remote') ??
+    players.find((p) => p.id === 'p2') ??
+    players[1];
   const bottomSeat = players.find((p) => p !== topSeat);
-  const isVsMachine = players.some((p) => p.controller === 'npc');
+  const hasOpponent = players.some((p) => p.controller !== 'local');
 
   // Esqueleto persistente: só o conteúdo dos painéis é redesenhado, então o
   // avatar nunca sai do DOM (o fade e as animações não reiniciam a cada clique).
@@ -132,7 +160,7 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
    * na frente da mesa, balão ao lado da cabeça) ou só o nome.
    */
   function renderSeat(seat, side) {
-    const turnChip = h('span', { class: 'seat__turn' }, seat.controller === 'local' && isVsMachine ? 'Sua vez' : 'Na vez');
+    const turnChip = h('span', { class: 'seat__turn' }, seat.controller === 'local' && hasOpponent ? 'Sua vez' : 'Na vez');
     if (seat === avatarSeat) {
       const level = seat.npcLevel ? character.levels[seat.npcLevel] : null;
       return h(
@@ -180,10 +208,12 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
 
   const playerById = (id) => players.find((p) => p.id === id);
   const currentSeat = () => playerById(getCurrentPlayer(state).id);
-  // Só o jogador local da vez interage; na vez do NPC (ou, no futuro, do
-  // adversário online) tudo fica desabilitado.
+  // Só o jogador local da vez interage; na vez do NPC ou do adversário
+  // online tudo fica desabilitado.
   const isLocalTurn = () => currentSeat()?.controller === 'local';
   const isNpcTurn = () => currentSeat()?.controller === 'npc';
+  const isOtherTurn = () => !isLocalTurn();
+  const notifyLocal = () => onLocalChange?.(state);
   const canAct = () => !busy && !destroyed && state.status === 'playing' && isLocalTurn();
   /** Pontos da mão atual nas categorias vazias (dica "Sua mão agora"), só na vez do jogador. */
   const currentHandPoints = () => (canAct() && state.turn.drawsUsed > 0 ? getScoreOptions(state) : null);
@@ -199,6 +229,7 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
         : turn.locked.flatMap((locked, i) => (locked ? [] : [i]));
     state = draw(state, rng);
     dealtIndices = new Set(replaced);
+    if (isLocalTurn()) notifyLocal();
     // até a última carta terminar de chegar (no mínimo DRAW_COOLDOWN_MIN_MS)
     if (isLocalTurn()) {
       startDrawCooldown(
@@ -222,6 +253,7 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
     state = toggleLock(state, index);
     updateCard(index);
     updatePlayStatus();
+    notifyLocal();
   }
 
   async function onScore(categoryId) {
@@ -241,7 +273,7 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
         // o tempo pode ter acabado enquanto o diálogo estava aberto
         if (!confirmed || state.turn !== turnBefore || !canAct()) return;
       }
-      finishTurn(scoreTurn(state, categoryId));
+      finishTurn(scoreTurn(state, categoryId), { local: true });
     } finally {
       scoring = false;
     }
@@ -250,13 +282,13 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
   function handleTimeout() {
     if (destroyed || busy || state.status !== 'playing') return;
     closeDialogs();
-    finishTurn(applyTimeout(state, rng), { timedOut: true });
+    finishTurn(applyTimeout(state, rng), { timedOut: true, local: true });
   }
 
   async function onExitClick() {
     const confirmed = await confirmDialog({
       title: 'Sair da partida?',
-      message: 'O progresso desta partida será perdido.',
+      message: exitMessage,
       confirmText: 'Sair',
       danger: true,
     });
@@ -310,11 +342,12 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
   // ---------- fluxo de turnos ----------
 
   async function beginTurn(subtitle) {
+    const myFlow = ++flow;
     busy = true;
     remaining = TURN_SECONDS;
     render();
     await showTurnNotice({ title: `Vez de ${getCurrentPlayer(state).name}`, subtitle });
-    if (destroyed) return;
+    if (destroyed || myFlow !== flow) return;
     busy = false;
     render();
     if (avatar && !greeted) {
@@ -325,9 +358,10 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
     if (avatar && currentSeat() === avatarSeat) avatar.setBase('thinking', { say: true });
     if (isNpcTurn()) {
       runNpcTurn();
-    } else {
-      timer?.start(); // o timer vale só para o humano
+    } else if (isLocalTurn()) {
+      timer?.start(); // o timer vale só para o humano (no online, só para quem está na vez)
     }
+    processRemote(); // jogadas do adversário que chegaram durante o aviso
   }
 
   /** Reação do avatar à jogada que acabou de ser marcada. */
@@ -338,11 +372,13 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
     avatar.react(last.playerId === avatarSeat.id ? reactToOwnScore(last) : reactToOpponentScore(last));
   }
 
-  async function finishTurn(next, { timedOut = false, pauseBeforeNotice = 0 } = {}) {
+  async function finishTurn(next, { timedOut = false, pauseBeforeNotice = 0, local = false } = {}) {
+    const myFlow = ++flow;
     timer?.stop();
     clearTimeout(cooldownTimer);
     cooldownTimer = null;
     state = next;
+    if (local) notifyLocal();
     dealtIndices = new Set();
     busy = true;
     scoreAnimPending = true;
@@ -350,17 +386,74 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
     reactToLastScore();
     if (pauseBeforeNotice > 0) {
       await sleep(pauseBeforeNotice); // deixa ver a célula recém-marcada
-      if (destroyed) return;
+      if (destroyed || myFlow !== flow) return;
     }
     const subtitle = describeLastScore(timedOut);
     if (isGameOver(state)) {
-      await showTurnNotice({ title: 'Fim de jogo!', subtitle, duration: 1800 });
-      if (destroyed) return;
-      destroy();
-      onGameOver(state);
+      await endGame(subtitle, myFlow);
       return;
     }
     await beginTurn(subtitle);
+  }
+
+  async function endGame(subtitle, myFlow) {
+    await showTurnNotice({ title: 'Fim de jogo!', subtitle, duration: 1800 });
+    if (destroyed || myFlow !== flow) return;
+    destroy();
+    onGameOver(state);
+  }
+
+  // ---------- adversário online ----------
+
+  /** Guarda o estado mais novo do adversário e aplica quando a mesa estiver livre. */
+  function applyRemote(next) {
+    if (destroyed) return;
+    pendingRemote = next;
+    processRemote();
+  }
+
+  function processRemote() {
+    if (!pendingRemote || busy || destroyed) return;
+    const next = pendingRemote;
+    pendingRemote = null;
+    const change = describeRemoteChange(state, next);
+    if (change.type === 'none') return;
+    if (change.type === 'scored') {
+      finishTurn(next, { pauseBeforeNotice: REMOTE_AFTER_SCORE_MS });
+      return;
+    }
+    if (change.type === 'reset') {
+      resync(next);
+      return;
+    }
+    state = next;
+    if (change.dealt.length > 0) {
+      dealtIndices = new Set(change.dealt);
+      render();
+    } else {
+      change.locks.forEach(updateCard);
+      updatePlayStatus();
+    }
+  }
+
+  /** Redesenha tudo com o estado do servidor (conflito ou mudança inesperada). */
+  function resync(next, subtitle = 'Partida sincronizada') {
+    if (destroyed) return;
+    pendingRemote = null;
+    timer?.stop();
+    clearTimeout(cooldownTimer);
+    cooldownTimer = null;
+    closeDialogs();
+    state = next;
+    dealtIndices = new Set();
+    if (isGameOver(state)) {
+      const myFlow = ++flow;
+      busy = true;
+      render();
+      endGame(null, myFlow);
+      return;
+    }
+    beginTurn(subtitle);
   }
 
   function describeLastScore(timedOut) {
@@ -388,7 +481,7 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
   function hintText() {
     const { turn } = state;
     if (busy) return '';
-    if (isNpcTurn()) return `${getCurrentPlayer(state).name} está jogando…`;
+    if (isOtherTurn()) return `${getCurrentPlayer(state).name} está jogando…`;
     if (turn.drawsUsed === 0) return 'Clique em “Tirar cartas” para começar o turno.';
     if (canDraw(state)) {
       return 'Clique nas cartas para trancar 🔒 e tire de novo, ou escolha uma categoria na tabela.';
@@ -505,8 +598,9 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
             h('span', { class: 'stars', 'aria-label': `${mode.stars} de 5 estrelas` }, stars(mode.stars)),
           ),
         ),
+        banner,
         timer &&
-          !isNpcTurn() &&
+          !isOtherTurn() &&
           h(
             'div',
             { class: timerClass(), role: 'timer', 'aria-label': 'Tempo restante do turno' },
@@ -521,7 +615,7 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
         state,
         seats: players,
         interactive: canAct(),
-        showPreview: !busy && isNpcTurn(),
+        showPreview: !busy && isOtherTurn(),
         highlight: npcPick,
         handPoints: currentHandPoints(),
         // o destaque da célula recém-marcada roda uma vez só (no 1º desenho)
@@ -547,4 +641,12 @@ export function showTable(root, { players, modeId, timerEnabled, onExit, onGameO
 
   window.scrollTo(0, 0);
   beginTurn(`Modo ${mode.name}`);
+
+  return {
+    applyRemote,
+    resync,
+    destroy() {
+      if (!destroyed) destroy();
+    },
+  };
 }

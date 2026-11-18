@@ -1,0 +1,264 @@
+rules_version = '2';
+
+// Regras do Firestore do Yar! (modo online).
+// Formato da sala: ver src/online/roomState.js e a seção "Multijogador
+// online" do CLAUDE.md. Não há Cloud Functions: o jogo é autoritativo no
+// cliente (aceitável entre amigos); estas regras garantem QUEM pode mudar O QUÊ.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Qualquer outra coleção fica fechada: sem uma regra "allow", tudo é negado.
+
+    match /rooms/{code} {
+
+      // ---------------------------------------------------------- auxiliares
+
+      // Usuário logado (Google ou convidado/anônimo).
+      function signedIn() {
+        return request.auth != null;
+      }
+
+      function me() {
+        return request.auth.uid;
+      }
+
+      // Sala como está gravada (antes) e como ficaria depois da gravação.
+      function stored() {
+        return resource.data;
+      }
+
+      function incoming() {
+        return request.resource.data;
+      }
+
+      function isHost() {
+        return stored().hostUid == me();
+      }
+
+      function isGuest() {
+        return stored().guestUid == me();
+      }
+
+      // Membros da sala: o anfitrião e o convidado.
+      function isMember() {
+        return isHost() || isGuest();
+      }
+
+      // O outro jogador da sala.
+      function opponent() {
+        return isHost() ? stored().guestUid : stored().hostUid;
+      }
+
+      // Campos de primeiro nível que a gravação altera (adiciona, muda ou apaga).
+      function changed() {
+        return incoming().diff(stored()).affectedKeys();
+      }
+
+      function onlyChanged(keys) {
+        return changed().hasOnly(keys);
+      }
+
+      // Apelido: texto de 1 a 16 caracteres.
+      function validName(name) {
+        return name is string && name.size() >= 1 && name.size() <= 16;
+      }
+
+      // Código: 6 caracteres sem os ambíguos 0/O e 1/I/L.
+      function validCode() {
+        return code.matches('^[2-9A-HJKMNP-Z]{6}$');
+      }
+
+      // Modos existentes (src/core/modes.js).
+      function validMode(mode) {
+        return mode in ['basic', 'odd', 'even', 'pairs', 'low', 'sequence', 'no_numbers', 'full'];
+      }
+
+      // ------------------------------------------- regras que valem sempre
+
+      // hostUid, guestUid, players (apelidos), mode, timerEnabled e createdAt
+      // nunca mudam depois de criados. (O guestUid é "criado" uma única vez,
+      // quando o amigo entra — isso é tratado em joining(), separado.)
+      function fixedFieldsKept() {
+        return !changed().hasAny(['hostUid', 'guestUid', 'players', 'mode', 'timerEnabled', 'createdAt']);
+      }
+
+      // Presença (lastSeen): cada jogador só altera a PRÓPRIA chave, e sempre
+      // com o horário do servidor (serverTimestamp), para ninguém falsificar.
+      function presenceOk() {
+        return !changed().hasAny(['presence']) || (
+          incoming().presence.diff(stored().presence).affectedKeys().hasOnly([me()]) &&
+          incoming().presence[me()] == request.time
+        );
+      }
+
+      // Voto de revanche: cada jogador só altera o PRÓPRIO voto, e o voto vale
+      // para a partida atual (rematch[uid] == match).
+      function rematchOk() {
+        return !changed().hasAny(['rematch']) || (
+          incoming().rematch.diff(stored().rematch).affectedKeys().hasOnly([me()]) &&
+          incoming().rematch[me()] == stored().match
+        );
+      }
+
+      // updatedAt só pode receber o horário do servidor.
+      function updatedAtOk() {
+        return !changed().hasAny(['updatedAt']) || incoming().updatedAt == request.time;
+      }
+
+      // Toda gravação que muda o jogo sobe o contador rev em exatamente 1
+      // (duas gravações baseadas no mesmo estado não passam as duas).
+      function revBumped() {
+        return incoming().rev == stored().rev + 1;
+      }
+
+      // O jogo gravado tem 2 jogadores e a vez é de um dos membros.
+      function gameOk() {
+        return incoming().game.currentUid in [stored().hostUid, stored().guestUid] &&
+          incoming().game.players.size() == 2;
+      }
+
+      // -------------------------------------------------- ações permitidas
+
+      // ENTRAR: quem não é membro preenche guestUid com o próprio uid, só se a
+      // vaga estava vazia, a sala está em espera e teve atividade nas últimas
+      // 24 h. Junto, só pode gravar o próprio apelido e a própria presença.
+      function joining() {
+        return !isMember() &&
+          stored().status == 'waiting' &&
+          stored().guestUid == null &&
+          request.time < stored().updatedAt + duration.value(24, 'h') &&
+          onlyChanged(['guestUid', 'players', 'presence', 'updatedAt']) &&
+          incoming().guestUid == me() &&
+          incoming().players.diff(stored().players).affectedKeys().hasOnly([me()]) &&
+          incoming().players[me()].keys().hasOnly(['name']) &&
+          validName(incoming().players[me()].name) &&
+          incoming().presence.diff(stored().presence).affectedKeys().hasOnly([me()]) &&
+          incoming().presence[me()] == request.time &&
+          incoming().updatedAt == request.time;
+      }
+
+      // SINAL DE VIDA: membro atualiza só a própria presença (a cada 20 s).
+      function heartbeatOnly() {
+        return onlyChanged(['presence']);
+      }
+
+      // COMEÇAR: só o anfitrião, com a sala em espera e o convidado presente.
+      // A sala passa a 'playing', partida nº 1, rev + 1.
+      function starting() {
+        return isHost() &&
+          stored().status == 'waiting' &&
+          stored().guestUid != null &&
+          onlyChanged(['status', 'game', 'rev', 'match', 'presence', 'updatedAt']) &&
+          incoming().status == 'playing' &&
+          incoming().match == 1 &&
+          revBumped() &&
+          gameOk();
+      }
+
+      // JOGADA: só quem é o currentUid ATUAL (antes da gravação) altera o game.
+      // A sala só vira 'finished' junto com o fim da partida no próprio game.
+      function playingMove() {
+        return stored().status == 'playing' &&
+          stored().game.currentUid == me() &&
+          onlyChanged(['game', 'rev', 'status', 'presence', 'updatedAt']) &&
+          revBumped() &&
+          gameOk() &&
+          (
+            (incoming().status == 'playing' && incoming().game.status == 'playing') ||
+            (incoming().status == 'finished' && incoming().game.status == 'finished')
+          );
+      }
+
+      // PEDIR REVANCHE: com a partida terminada, o membro grava só o próprio voto.
+      function votingRematch() {
+        return stored().status == 'finished' &&
+          onlyChanged(['rematch', 'presence', 'updatedAt']);
+      }
+
+      // REVANCHE: com a partida terminada, quem vota por último recomeça —
+      // desde que o OUTRO já tenha votado nesta partida. Partida nº + 1,
+      // rev + 1, e o abandono anterior (se houve) é apagado.
+      function restarting() {
+        return stored().status == 'finished' &&
+          onlyChanged(['status', 'game', 'rev', 'match', 'rematch', 'forfeitUid', 'presence', 'updatedAt']) &&
+          incoming().status == 'playing' &&
+          incoming().match == stored().match + 1 &&
+          revBumped() &&
+          gameOk() &&
+          incoming().rematch[me()] == stored().match &&
+          incoming().rematch.get(opponent(), -1) == stored().match &&
+          incoming().forfeitUid == null;
+      }
+
+      // ABANDONO: durante a partida, um membro encerra se o OUTRO está sem
+      // sinal de vida há mais de 2 minutos (conferido com o relógio do
+      // servidor). O game não muda; forfeitUid aponta quem abandonou.
+      function forfeiting() {
+        return stored().status == 'playing' &&
+          onlyChanged(['status', 'forfeitUid', 'presence', 'updatedAt']) &&
+          incoming().status == 'finished' &&
+          incoming().forfeitUid == opponent() &&
+          request.time > stored().presence.get(opponent(), stored().updatedAt) + duration.value(2, 'm');
+      }
+
+      // ------------------------------------------------------------- regras
+
+      // LER uma sala (get): precisa estar logado e ser membro — ou a sala
+      // estar em espera, para quem tem o código conseguir entrar. Ler um
+      // código que não existe (resource == null) é permitido: é assim que a
+      // tela diz "sala não existe" e que a criação confere se o código está livre.
+      allow get: if signedIn() &&
+        (resource == null || isMember() || resource.data.status == 'waiting');
+
+      // LISTAR a coleção: ninguém (não dá para descobrir códigos de outras salas).
+      allow list: if false;
+
+      // CRIAR: logado, código válido no id, eu sou o anfitrião, vaga do
+      // convidado vazia, sala em espera, sem jogo, contadores zerados,
+      // horários do servidor e só os campos esperados.
+      allow create: if signedIn() &&
+        validCode() &&
+        incoming().keys().hasOnly(['hostUid', 'guestUid', 'players', 'mode', 'timerEnabled', 'status',
+          'createdAt', 'updatedAt', 'rev', 'match', 'game', 'presence', 'rematch', 'forfeitUid']) &&
+        incoming().keys().hasAll(['hostUid', 'guestUid', 'players', 'mode', 'timerEnabled', 'status',
+          'createdAt', 'updatedAt', 'rev', 'match', 'game', 'presence', 'rematch', 'forfeitUid']) &&
+        incoming().hostUid == me() &&
+        incoming().guestUid == null &&
+        incoming().players.keys().hasOnly([me()]) &&
+        incoming().players[me()].keys().hasOnly(['name']) &&
+        validName(incoming().players[me()].name) &&
+        validMode(incoming().mode) &&
+        incoming().timerEnabled is bool &&
+        incoming().status == 'waiting' &&
+        incoming().game == null &&
+        incoming().rev == 0 &&
+        incoming().match == 0 &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time &&
+        incoming().presence.keys().hasOnly([me()]) &&
+        incoming().presence[me()] == request.time &&
+        incoming().rematch.size() == 0 &&
+        incoming().forfeitUid == null;
+
+      // ATUALIZAR: entrar na sala (não membro), ou — só membros — uma das
+      // ações acima, sempre respeitando os campos fixos, a presença própria,
+      // o voto próprio e o updatedAt do servidor.
+      allow update: if signedIn() && (
+        joining() ||
+        (
+          isMember() &&
+          fixedFieldsKept() &&
+          presenceOk() &&
+          rematchOk() &&
+          updatedAtOk() &&
+          (heartbeatOnly() || starting() || playingMove() || votingRematch() || restarting() || forfeiting())
+        )
+      );
+
+      // APAGAR pelo cliente: nunca. (Salas paradas há 24 h são ignoradas pelo
+      // jogo; dá para limpá-las pelo console ou com uma política de TTL.)
+      allow delete: if false;
+    }
+  }
+}

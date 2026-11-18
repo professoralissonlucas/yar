@@ -67,7 +67,7 @@ const MATCH_TYPES = [
     title: 'Online',
     description: 'Contra um amigo',
     media: () => h('span', { class: 'option__media option__media--icon' }, ICONS.globe()),
-    enabled: false,
+    enabled: true,
   },
 ];
 
@@ -78,9 +78,63 @@ function cleanName(value) {
 let idCounter = 0;
 const uid = (prefix) => `${prefix}-${++idCounter}`;
 
+const radioOption = ({ name, value, checked, disabled = false, extraClass = '', onChange }, ...content) =>
+  h(
+    'label',
+    { class: `option${disabled ? ' option--disabled' : ''}${extraClass ? ` ${extraClass}` : ''}` },
+    h('input', { type: 'radio', name, value, checked, disabled, onChange }),
+    h('span', { class: 'option__body' }, ...content),
+  );
+
+const modeOption = (mode, selectedId) =>
+  radioOption(
+    { name: 'mode', value: mode.id, checked: mode.id === selectedId, extraClass: 'option--mode' },
+    h(
+      'span',
+      { class: 'option__text' },
+      h(
+        'span',
+        { class: 'option__head' },
+        h('span', { class: 'option__title' }, mode.name),
+        h('span', { class: 'stars', 'aria-label': `${mode.stars} de 5 estrelas` }, stars(mode.stars)),
+      ),
+      h(
+        'span',
+        { class: 'option__desc' },
+        `${pluralize(mode.maxDraws, 'tirada', 'tiradas')} · ${pluralize(mode.categories.length, 'categoria', 'categorias')}`,
+      ),
+      h(
+        'span',
+        { class: 'chips' },
+        mode.categories.map((id) => h('span', { class: 'chip' }, categoryName(id))),
+      ),
+    ),
+  );
+
+/** Grade de modos de jogo (radios name="mode"). Também usada no lobby online. */
+export function renderModePicker({ selectedId, labelledBy }) {
+  const initial = MODES.some((m) => m.id === selectedId) ? selectedId : MODES[0].id;
+  return h(
+    'div',
+    { class: 'option-grid option-grid--modes', role: 'radiogroup', 'aria-labelledby': labelledBy },
+    MODES.map((mode) => modeOption(mode, initial)),
+  );
+}
+
+/** Chave do timer de 45 s (checkbox name="timer"). `note`: texto extra opcional. */
+export function renderTimerSwitch({ checked, note = null }) {
+  return h(
+    'label',
+    { class: 'switch' },
+    h('input', { type: 'checkbox', name: 'timer', checked: Boolean(checked) }),
+    h('span', { class: 'switch__track', 'aria-hidden': 'true' }),
+    h('span', { class: 'switch__label' }, 'Timer de 45 s por turno', note),
+  );
+}
+
 /**
  * Tela de início.
- * onPlay({ matchType: 'local' | 'npc', names, playerName, npcLevel, modeId, timerEnabled })
+ * onPlay({ matchType: 'local' | 'npc' | 'online', names, playerName, npcLevel, modeId, timerEnabled })
  */
 export function showStart(root, { initial, onPlay }) {
   const names = initial.names ?? DEFAULT_NAMES;
@@ -88,21 +142,20 @@ export function showStart(root, { initial, onPlay }) {
     ? initial.matchType
     : 'local';
 
-  /** Seção com título normal acima do bloco. */
-  const section = (title, body, { matchType, id = uid('sec') } = {}) =>
+  /**
+   * Seção com título normal acima do bloco. `matchType`: só aparece nesse tipo
+   * de partida; `hideFor`: tipo em que fica escondida.
+   */
+  const section = (title, body, { matchType, hideFor, id = uid('sec') } = {}) =>
     h(
       'section',
-      { class: 'form-section', dataset: matchType ? { matchType } : undefined, 'aria-labelledby': id },
+      {
+        class: 'form-section',
+        dataset: matchType ? { matchType } : hideFor ? { hideFor } : undefined,
+        'aria-labelledby': id,
+      },
       h('h2', { class: 'section-title', id }, title),
       body(id),
-    );
-
-  const radioOption = ({ name, value, checked, disabled = false, extraClass = '', onChange }, ...content) =>
-    h(
-      'label',
-      { class: `option${disabled ? ' option--disabled' : ''}${extraClass ? ` ${extraClass}` : ''}` },
-      h('input', { type: 'radio', name, value, checked, disabled, onChange }),
-      h('span', { class: 'option__body' }, ...content),
     );
 
   const matchTypeOption = (type) =>
@@ -161,31 +214,6 @@ export function showStart(root, { initial, onPlay }) {
       }),
     );
 
-  const modeOption = (mode) =>
-    radioOption(
-      { name: 'mode', value: mode.id, checked: mode.id === initial.modeId, extraClass: 'option--mode' },
-      h(
-        'span',
-        { class: 'option__text' },
-        h(
-          'span',
-          { class: 'option__head' },
-          h('span', { class: 'option__title' }, mode.name),
-          h('span', { class: 'stars', 'aria-label': `${mode.stars} de 5 estrelas` }, stars(mode.stars)),
-        ),
-        h(
-          'span',
-          { class: 'option__desc' },
-          `${pluralize(mode.maxDraws, 'tirada', 'tiradas')} · ${pluralize(mode.categories.length, 'categoria', 'categorias')}`,
-        ),
-        h(
-          'span',
-          { class: 'chips' },
-          mode.categories.map((id) => h('span', { class: 'chip' }, categoryName(id))),
-        ),
-      ),
-    );
-
   const playButton = h('button', { type: 'submit', class: 'btn btn--primary btn--xl' }, 'Jogar');
   const playHint = h('p', { class: 'form-hint', 'aria-live': 'polite' });
 
@@ -223,26 +251,36 @@ export function showStart(root, { initial, onPlay }) {
         ),
       { matchType: 'local' },
     ),
-    section('Modo de jogo', (id) =>
-      h('div', { class: 'option-grid option-grid--modes', role: 'radiogroup', 'aria-labelledby': id }, MODES.map(modeOption)),
-    ),
-    section('Opções', () =>
-      h(
-        'div',
-        { class: 'panel' },
+    section(
+      'Online',
+      () =>
         h(
-          'label',
-          { class: 'switch' },
-          h('input', { type: 'checkbox', name: 'timer', checked: Boolean(initial.timerEnabled) }),
-          h('span', { class: 'switch__track', 'aria-hidden': 'true' }),
+          'div',
+          { class: 'panel stack' },
           h(
-            'span',
-            { class: 'switch__label' },
-            'Timer de 45 s por turno',
-            h('span', { class: 'muted', dataset: { matchType: 'npc' } }, ' (só para você)'),
+            'p',
+            {},
+            'Entre com sua conta Google ou como convidado. Depois crie uma sala e mande o código para um amigo, ou use o código que ele mandou.',
           ),
+          h('p', { class: 'muted small' }, 'O modo de jogo e o timer são escolhidos por quem cria a sala.'),
         ),
-      ),
+      { matchType: 'online' },
+    ),
+    section('Modo de jogo', (id) => renderModePicker({ selectedId: initial.modeId, labelledBy: id }), {
+      hideFor: 'online',
+    }),
+    section(
+      'Opções',
+      () =>
+        h(
+          'div',
+          { class: 'panel' },
+          renderTimerSwitch({
+            checked: initial.timerEnabled,
+            note: h('span', { class: 'muted', dataset: { matchType: 'npc' } }, ' (só para você)'),
+          }),
+        ),
+      { hideFor: 'online' },
     ),
     h('div', { class: 'form-actions' }, playButton, playHint),
   );
@@ -257,6 +295,10 @@ export function showStart(root, { initial, onPlay }) {
     for (const el of form.querySelectorAll('[data-match-type]')) {
       el.hidden = el.dataset.matchType !== type;
     }
+    for (const el of form.querySelectorAll('[data-hide-for]')) {
+      el.hidden = el.dataset.hideFor === type;
+    }
+    playButton.textContent = type === 'online' ? 'Continuar' : 'Jogar';
     const visibleNames = [...form.querySelectorAll('input[type=text]')].filter(
       (input) => !input.closest('[hidden]'),
     );

@@ -1,0 +1,292 @@
+/* Telas do modo online (carregado junto com o chunk online). */
+
+.online-screen {
+  display: grid;
+  gap: var(--space-3);
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.online-loading {
+  justify-items: center;
+  padding-top: 20vh;
+  text-align: center;
+}
+
+.online-header {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.online-header__bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-1);
+  margin-bottom: var(--space-1);
+}
+
+.online-header__title {
+  color: var(--gold);
+  font-family: var(--font-display);
+  font-size: var(--fs-title);
+  line-height: 1.15;
+}
+
+.account {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  font-size: var(--fs-small);
+}
+
+.account__label {
+  overflow-wrap: anywhere;
+}
+
+.online-card {
+  padding: var(--space-3);
+}
+
+.login-buttons {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.login-buttons .btn {
+  width: 100%;
+}
+
+.btn--light {
+  background: #fff;
+  color: #1f1f1f;
+  box-shadow: 0 4px 0 rgba(0, 0, 0, 0.35);
+}
+
+.btn--light:hover:not(:disabled) {
+  background: #f1f1f1;
+}
+
+.google-logo {
+  width: 22px;
+  height: 22px;
+}
+
+.form-actions--start {
+  justify-items: start;
+}
+
+.form-actions--start .btn {
+  min-width: 0;
+}
+
+.online-message {
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius);
+  font-size: var(--fs-small);
+}
+
+.online-message--error {
+  border: 1px solid rgba(226, 103, 92, 0.6);
+  background: rgba(226, 103, 92, 0.16);
+  color: #ffd2cd;
+}
+
+.online-message--info {
+  border: 1px solid rgba(229, 185, 78, 0.5);
+  background: var(--gold-tint);
+}
+
+@media (max-width: 520px) {
+  .online-card {
+    padding: var(--space-2);
+  }
+}
+
+/* ---------- lobby ---------- */
+
+.join-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+}
+
+.code-input {
+  flex: 1 1 180px;
+  min-width: 0;
+  max-width: 280px;
+  min-height: 48px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-strong);
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 1.375rem;
+  font-weight: 700;
+  letter-spacing: 0.25em;
+  text-transform: uppercase;
+}
+
+.code-input::placeholder {
+  color: rgba(244, 240, 227, 0.35);
+}
+
+.code-input:focus {
+  border-color: var(--gold);
+  outline: 3px solid rgba(244, 207, 112, 0.35);
+}
+
+/* ---------- sala de espera ---------- */
+
+.room-card {
+  justify-items: center;
+  text-align: center;
+}
+
+.room-code {
+  color: var(--gold-strong);
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: clamp(2.5rem, 12vw, 4rem);
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  line-height: 1.1;
+  /* compensa o espaçamento depois da última letra */
+  margin-right: -0.18em;
+  user-select: all;
+}
+
+.copy-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+}
+
+.copy-status {
+  color: var(--preview);
+  font-size: var(--fs-small);
+}
+
+/* sem mensagem, o botão fica centralizado */
+.copy-status:empty {
+  display: none;
+}
+
+.invite-link {
+  width: 100%;
+  max-width: 460px;
+  min-height: 40px;
+  padding: 0 var(--space-1);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-strong);
+  font-size: var(--fs-small);
+}
+
+.room-players {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.room-player {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1);
+  min-height: 48px;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.room-player--empty {
+  border: 2px dashed var(--border-strong);
+  background: transparent;
+}
+
+.room-status {
+  font-weight: 600;
+}
+
+/* ---------- mesa online: aviso no cabeçalho ---------- */
+
+.online-banner {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  padding: 4px 4px 4px 12px;
+  border-radius: var(--radius-pill);
+  font-size: var(--fs-small);
+  font-weight: 600;
+}
+
+.online-banner--warn {
+  border: 1px solid rgba(229, 185, 78, 0.6);
+  background: var(--gold-tint);
+  color: var(--gold-strong);
+}
+
+.online-banner--error {
+  border: 1px solid rgba(226, 103, 92, 0.6);
+  background: rgba(226, 103, 92, 0.18);
+  color: #ffd2cd;
+}
+
+.online-banner .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.online-banner__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* sem o botão, o aviso fica com o mesmo respiro dos dois lados */
+.online-banner:has(.btn[hidden]) {
+  padding-right: 12px;
+}
+
+@media (max-width: 999px) {
+  /* no celular o aviso vai para uma linha própria abaixo do "Vez de" */
+  .table-header:has(.online-banner:not([hidden])) {
+    flex-wrap: wrap;
+  }
+
+  .online-banner {
+    order: 3;
+    flex-basis: 100%;
+  }
+
+  .online-banner__text {
+    white-space: normal;
+  }
+}
+
+/* ---------- resultado online ---------- */
+
+.gameover-header__note {
+  font-weight: 600;
+}
+
+.gameover-online {
+  display: grid;
+  justify-items: center;
+  gap: var(--space-2);
+}
+
+.rematch-status {
+  min-height: 1.45em;
+  color: var(--gold-strong);
+  font-weight: 600;
+  text-align: center;
+}

@@ -118,14 +118,19 @@ Reações do professor (do ponto de vista dele): pensa na vez dele; fica feliz/e
 
 ## Multijogador online (Firebase)
 
-- **Login**: Google ou "Entrar como convidado" (auth anônima) + apelido.
-- **Salas**: o anfitrião cria uma sala, escolhe o modo e recebe um **código de 6 caracteres** (sem letras ambíguas: sem 0/O, 1/I/L). O amigo entra digitando o código.
+- Todo o código online (`src/online/`, telas em `src/ui/screens/online/`, `src/ui/online.css`) é carregado com **`import()` dinâmico** pelo `app.js`, só quando o jogador escolhe "Online" ou abre um convite (`?sala=CODIGO`). O chunk principal não tem Firebase.
+- **Login** (`src/online/auth.js`): "Entrar com Google" (popup) ou "Jogar como convidado" (anônimo) + apelido (até 16 caracteres; vem preenchido com o último usado ou o 1º nome do Google). Telas online mostram quem está logado e "Sair".
+- **Salas** (`src/online/rooms.js`, puras em `roomCode.js`/`roomState.js`): o anfitrião escolhe modo e timer no lobby e recebe um **código de 6 caracteres** (sem 0/O, 1/I/L), gerado com transação. Sala de espera: código grande, "Copiar convite" (`https://professoralissonlucas.github.io/yar/?sala=CODIGO`), nomes; o anfitrião clica "Começar" e quem começa é sorteado. Membro sempre pode voltar à sala pelo código (a URL fica com `?sala=` enquanto está nela).
 - **Firestore** — coleção `rooms/{code}`:
-  - `hostUid`, `guestUid`, `players: { uid: { name } }`, `mode`, `status` (`waiting` | `playing` | `finished`), `createdAt`, `updatedAt`
-  - `game`: `currentUid`, `turnIndex`, `hand` (5 valores), `locked` (5 booleanos), `drawsUsed`, `deck` (cartas restantes do turno), `scores: { uid: { categoryId: number | null } }`
-- Sincronização em tempo real com `onSnapshot`. **Somente o jogador da vez** grava mudanças no `game` (usar transação).
-- Autoritativo no cliente (aceitável para jogos entre amigos). As regras de segurança do Firestore garantem: só membros da sala leem/escrevem; só o jogador da vez altera o `game`.
-- Salas `finished` ou sem atividade há 24 h podem ser ignoradas/limpas.
+  - `hostUid`, `guestUid` (null até entrar), `players: { uid: { name } }`, `mode`, `timerEnabled`, `status` (`waiting` | `playing` | `finished`), `createdAt`, `updatedAt`
+  - `game`: o estado de `src/core/game.js` (mesmo formato de `createGame`) + `currentUid` (jogador da vez, para as regras)
+  - `rev`: sobe 1 a cada gravação que muda o `game` · `match`: nº da partida na sala (0 antes de começar)
+  - `presence: { uid: Timestamp }` (lastSeen a cada 20 s) · `rematch: { uid: match }` (voto de revanche da partida atual) · `forfeitUid` (quem perdeu por abandono)
+- **Partida** (`src/online/sync.js`): a mesma mesa da partida local, com assentos `controller: 'local'` (eu) e `'remote'` (o amigo); `showTable` recebe `initialState`, `onLocalChange` e devolve `applyRemote`/`resync`. **Somente o jogador da vez** grava, com `runTransaction` conferindo o `rev` (se mudou no meio, descarta e redesenha). Cliques rápidos viram uma gravação só (`pushQueue.js`). As tiradas usam `Math.random` no cliente da vez; o timer (se ligado) é aplicado por quem está na vez.
+- **Presença**: sem sinal há 60 s → "Oponente desconectado"; há 2 min → botão "Encerrar partida" (vitória por abandono, conferida pelas regras com o relógio do servidor).
+- **Fim**: resultado com "Revanche" (recomeça na mesma sala quando os dois pedem; começa quem não começou a anterior) e "Sair da sala". Sem o professor no online: cada jogador aparece só com o nome.
+- Autoritativo no cliente (aceitável entre amigos). As regras (`firestore.rules`, comentadas) garantem quem pode mudar o quê: ninguém lista nem apaga salas; só membros leem (ou qualquer logado, se `waiting`); só o `currentUid` atual muda o `game`; campos fixos nunca mudam; cada um só mexe na própria presença e no próprio voto.
+- Salas sem atividade há 24 h não aceitam entrada (podem ser limpas pelo console).
 - A configuração do Firebase (`firebaseConfig`) é pública por natureza e pode ir no repositório; a segurança vem das regras e dos domínios autorizados.
 
 ---
