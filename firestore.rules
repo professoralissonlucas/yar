@@ -1,9 +1,20 @@
 rules_version = '2';
 
 // Regras do Firestore do Yar! (modo online).
-// Formato da sala: ver src/online/roomState.js e a seção "Multijogador
-// online" do CLAUDE.md. Não há Cloud Functions: o jogo é autoritativo no
-// cliente (aceitável entre amigos); estas regras garantem QUEM pode mudar O QUÊ.
+//
+// Formato da sala: ver src/online/roomState.js e a seção "Multijogador online"
+// do CLAUDE.md. Não há Cloud Functions: o jogo roda no cliente, e estas regras
+// garantem QUEM pode mudar O QUÊ e que os dados gravados fazem sentido — para
+// ninguém trapacear editando o banco pelo console do navegador.
+//
+// Limite assumido: as cartas são sorteadas no navegador de quem está na vez.
+// As regras conferem a forma e a progressão de cada jogada (cartas trancadas
+// não mudam, o baralho encolhe certo, uma categoria vazia por marcação, pontos
+// dentro da faixa da categoria), mas não provam que o embaralhamento foi
+// honesto nem que os pontos são exatamente os da mão.
+//
+// Espelho em JavaScript destas regras de jogada (usado só nos testes):
+// tests/online/rulesMirror.js — mantenha os dois iguais.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -12,7 +23,50 @@ service cloud.firestore {
 
     match /rooms/{code} {
 
-      // ---------------------------------------------------------- auxiliares
+      // ================================================== tabelas do jogo
+
+      // Modos (espelho de src/core/modes.js): tiradas por turno e categorias, na ordem.
+      function modes() {
+        return {
+          'basic': { 'draws': 3, 'cats': ['ones', 'twos', 'threes', 'fours', 'fives', 'sixes'] },
+          'odd': { 'draws': 3, 'cats': ['ones', 'threes', 'fives', 'pair', 'three_kind', 'chance'] },
+          'even': { 'draws': 3, 'cats': ['twos', 'fours', 'sixes', 'pair', 'three_kind', 'chance'] },
+          'pairs': { 'draws': 3, 'cats': ['ones', 'twos', 'threes', 'fours', 'fives', 'sixes', 'two_pair', 'full_house'] },
+          'low': { 'draws': 3, 'cats': ['ones', 'twos', 'threes', 'pair', 'two_pair', 'chance'] },
+          'sequence': { 'draws': 4, 'cats': ['ones', 'twos', 'threes', 'fours', 'fives', 'sixes', 'small_straight', 'large_straight'] },
+          'no_numbers': { 'draws': 4, 'cats': ['pair', 'three_kind', 'four_kind', 'two_pair', 'full_house', 'yar',
+            'small_straight', 'large_straight', 'chance'] },
+          'full': { 'draws': 4, 'cats': ['ones', 'twos', 'threes', 'fours', 'fives', 'sixes', 'pair', 'three_kind',
+            'four_kind', 'two_pair', 'full_house', 'yar', 'small_straight', 'large_straight', 'chance'] }
+        };
+      }
+
+      // Pontuação mínima e máxima de cada categoria (espelho de src/core/scoring.js).
+      function catRange() {
+        return {
+          'ones': [0, 5], 'twos': [0, 10], 'threes': [0, 15], 'fours': [0, 20], 'fives': [0, 25],
+          'sixes': [0, 30], 'pair': [0, 12], 'three_kind': [0, 18], 'four_kind': [0, 24],
+          'two_pair': [0, 15], 'full_house': [0, 25], 'yar': [0, 50], 'small_straight': [0, 30],
+          'large_straight': [0, 40], 'chance': [5, 30]
+        };
+      }
+
+      // Campos permitidos (nada de campo extra: keys().hasOnly limita o tamanho do documento).
+      function roomKeys() {
+        return ['hostUid', 'guestUid', 'players', 'mode', 'timerEnabled', 'status', 'createdAt', 'updatedAt',
+          'expireAt', 'rev', 'match', 'game', 'presence', 'rematch', 'forfeitUid'];
+      }
+
+      function gameKeys() {
+        return ['modeId', 'maxDraws', 'categories', 'deckCopiesPerValue', 'players', 'currentPlayerIndex',
+          'round', 'turn', 'scores', 'status', 'lastScored', 'currentUid'];
+      }
+
+      function turnKeys() {
+        return ['deck', 'hand', 'locked', 'drawsUsed'];
+      }
+
+      // ======================================================= auxiliares
 
       // Usuário logado (Google ou convidado/anônimo).
       function signedIn() {
@@ -64,20 +118,211 @@ service cloud.firestore {
         return name is string && name.size() >= 1 && name.size() <= 16;
       }
 
-      // Código: 6 caracteres sem os ambíguos 0/O e 1/I/L.
+      // Código: exatamente 6 caracteres, sem os ambíguos 0/O e 1/I/L.
       function validCode() {
         return code.matches('^[2-9A-HJKMNP-Z]{6}$');
       }
 
-      // Modos existentes (src/core/modes.js).
-      function validMode(mode) {
-        return mode in ['basic', 'odd', 'even', 'pairs', 'low', 'sequence', 'no_numbers', 'full'];
+      // Validade da sala (TTL): agora + 24 h, aceitando de 12 h a 36 h por causa
+      // do relógio do aparelho, que pode estar um pouco errado.
+      function expireAtOk() {
+        return incoming().expireAt is timestamp &&
+          incoming().expireAt > request.time + duration.value(12, 'h') &&
+          incoming().expireAt < request.time + duration.value(36, 'h');
       }
 
-      // ------------------------------------------- regras que valem sempre
+      // Sala ainda válida (salas antigas sem expireAt: updatedAt + 24 h).
+      function notExpired() {
+        return request.time < stored().get('expireAt', stored().updatedAt + duration.value(24, 'h'));
+      }
+
+      // =========================================== validação do estado do jogo
+
+      // Mão, cadeados e baralho de um turno: tipos e tamanhos.
+      // Antes da 1ª tirada: tudo vazio e destrancado. Depois: 5 cartas de 1 a 6,
+      // 5 cadeados (booleanos), baralho só com cartas de 1 a 6 e no máximo 31.
+      function turnOk(g) {
+        let t = g.turn;
+        return t.keys().hasOnly(turnKeys()) && t.keys().hasAll(turnKeys()) &&
+          t.drawsUsed is int &&
+          t.hand is list && t.hand.hasOnly([1, 2, 3, 4, 5, 6]) &&
+          t.deck is list && t.deck.hasOnly([1, 2, 3, 4, 5, 6]) &&
+          t.locked is list && t.locked.size() == 5 && t.locked.hasOnly([true, false]) &&
+          (
+            (t.drawsUsed == 0 && t.hand.size() == 0 && t.deck.size() == 0 && t.locked.hasOnly([false])) ||
+            (t.drawsUsed >= 1 && t.drawsUsed <= g.maxDraws && t.hand.size() == 5 && t.deck.size() <= 31)
+          );
+      }
+
+      // Última marcação: null ou { playerId, categoryId, points } com points inteiro.
+      function lastScoredOk(g) {
+        return g.lastScored == null || (
+          g.lastScored.keys().hasOnly(['playerId', 'categoryId', 'points']) &&
+          g.lastScored.keys().hasAll(['playerId', 'categoryId', 'points']) &&
+          g.lastScored.playerId is string &&
+          g.lastScored.categoryId is string &&
+          g.lastScored.points is int
+        );
+      }
+
+      // Forma geral do `game`: só os campos do core (+ currentUid), 2 jogadores,
+      // vez coerente com currentUid, status conhecido.
+      function gameShapeOk(g) {
+        return g.keys().hasOnly(gameKeys()) && g.keys().hasAll(gameKeys()) &&
+          g.players is list && g.players.size() == 2 &&
+          g.currentPlayerIndex is int && g.currentPlayerIndex in [0, 1] &&
+          g.currentUid == g.players[g.currentPlayerIndex].id &&
+          g.round is int && g.round >= 0 &&
+          g.status in ['playing', 'finished'] &&
+          turnOk(g) &&
+          lastScoredOk(g);
+      }
+
+      // Placar de uma partida nova: exatamente as categorias do modo, todas vazias.
+      function freshScores(scores, cats) {
+        return scores.keys().hasOnly(cats) && scores.keys().hasAll(cats) && scores.values().hasOnly([null]);
+      }
+
+      // Jogador no `game`: { id, name } com o mesmo apelido gravado na sala.
+      function gamePlayerOk(p) {
+        return p.keys().hasOnly(['id', 'name']) && p.id in [stored().hostUid, stored().guestUid] &&
+          p.name == stored().players[p.id].name;
+      }
+
+      // Partida nova (começar ou revanche): modo da sala, tiradas e categorias do
+      // modo, baralho de 6 cópias por valor, os dois membros como jogadores, turno
+      // vazio, rodada 0, vez do primeiro jogador e todas as categorias vazias.
+      function newGameOk(g) {
+        let mode = modes()[stored().mode];
+        let host = stored().hostUid;
+        let guest = stored().guestUid;
+        return gameShapeOk(g) &&
+          g.modeId == stored().mode &&
+          g.maxDraws == mode.draws &&
+          g.categories == mode.cats &&
+          g.deckCopiesPerValue == 6 &&
+          gamePlayerOk(g.players[0]) && gamePlayerOk(g.players[1]) &&
+          g.players[0].id != g.players[1].id &&
+          g.currentPlayerIndex == 0 &&
+          g.round == 0 &&
+          g.status == 'playing' &&
+          g.turn.drawsUsed == 0 &&
+          g.lastScored == null &&
+          g.scores.keys().hasOnly([host, guest]) && g.scores.keys().hasAll([host, guest]) &&
+          freshScores(g.scores[host], mode.cats) &&
+          freshScores(g.scores[guest], mode.cats);
+      }
+
+      // Durante a partida, nunca mudam: modo, limite de tiradas, categorias,
+      // tamanho do baralho, jogadores e quais jogadores têm placar.
+      function gameFixedKept(s, n) {
+        return n.modeId == s.modeId &&
+          n.maxDraws == s.maxDraws &&
+          n.categories == s.categories &&
+          n.deckCopiesPerValue == s.deckCopiesPerValue &&
+          n.players == s.players &&
+          n.scores.keys().hasOnly(s.scores.keys()) && n.scores.keys().hasAll(s.scores.keys());
+      }
+
+      // Mesmo turno do mesmo jogador, placar intacto (cadeado ou tirada).
+      function sameTurn(s, n) {
+        return n.currentPlayerIndex == s.currentPlayerIndex &&
+          n.round == s.round &&
+          n.status == 'playing' &&
+          n.scores == s.scores &&
+          n.lastScored == s.lastScored;
+      }
+
+      // Quantas cartas não estão trancadas (são as que a próxima tirada troca).
+      function unlockedCount(t) {
+        return (t.locked[0] ? 0 : 1) + (t.locked[1] ? 0 : 1) + (t.locked[2] ? 0 : 1) +
+          (t.locked[3] ? 0 : 1) + (t.locked[4] ? 0 : 1);
+      }
+
+      // Carta trancada continua igual depois da tirada.
+      function keptIfLocked(s, n, i) {
+        return !s.turn.locked[i] || n.turn.hand[i] == s.turn.hand[i];
+      }
+
+      // JOGADA "CADEADO": já tirou, só os cadeados mudam (mão e baralho iguais).
+      function lockMove(s, n) {
+        return sameTurn(s, n) &&
+          s.turn.drawsUsed >= 1 &&
+          n.turn.drawsUsed == s.turn.drawsUsed &&
+          n.turn.hand == s.turn.hand &&
+          n.turn.deck == s.turn.deck;
+      }
+
+      // JOGADA "TIRADA": drawsUsed sobe exatamente 1, sem passar do limite do modo.
+      // 1ª tirada: 5 cartas, nada trancado, baralho com 36 − 5 = 31.
+      // Demais: cadeados iguais, cartas trancadas iguais, pelo menos uma carta
+      // trocada e o baralho encolhe exatamente o número de cartas trocadas.
+      function drawMove(s, n) {
+        return sameTurn(s, n) &&
+          n.turn.drawsUsed == s.turn.drawsUsed + 1 &&
+          n.turn.drawsUsed <= n.maxDraws &&
+          (s.turn.drawsUsed == 0 ? firstDraw(n) : redraw(s, n));
+      }
+
+      function firstDraw(n) {
+        return n.turn.hand.size() == 5 &&
+          n.turn.locked.hasOnly([false]) &&
+          n.turn.deck.size() == n.deckCopiesPerValue * 6 - 5;
+      }
+
+      function redraw(s, n) {
+        let replaced = unlockedCount(s.turn);
+        return n.turn.locked == s.turn.locked &&
+          replaced >= 1 &&
+          keptIfLocked(s, n, 0) && keptIfLocked(s, n, 1) && keptIfLocked(s, n, 2) &&
+          keptIfLocked(s, n, 3) && keptIfLocked(s, n, 4) &&
+          n.turn.deck.size() == s.turn.deck.size() - replaced;
+      }
+
+      // Todas as categorias dos dois jogadores preenchidas?
+      function allFilled(scores, a, b) {
+        return !(null in scores[a].values()) && !(null in scores[b].values());
+      }
+
+      // JOGADA "MARCAÇÃO": precisa ter tirado; preenche UMA categoria VAZIA do
+      // próprio jogador, com valor inteiro dentro da faixa da categoria (igual a
+      // lastScored.points); o placar do outro e as categorias já marcadas não
+      // mudam; o turno volta a vazio; a vez passa ao outro — ou, se todo mundo
+      // preencheu tudo, a partida termina e a vez fica onde estava.
+      function scoreMove(s, n) {
+        return s.turn.drawsUsed >= 1 &&
+          n.lastScored != null &&
+          scoreDetails(s, n, s.players[s.currentPlayerIndex].id, s.players[1 - s.currentPlayerIndex].id,
+            n.lastScored.categoryId, n.lastScored.points);
+      }
+
+      function scoreDetails(s, n, player, other, cat, points) {
+        return n.lastScored.playerId == player &&
+          cat in n.categories &&
+          s.scores[player][cat] == null &&
+          n.scores[player].diff(s.scores[player]).affectedKeys().hasOnly([cat]) &&
+          n.scores[player][cat] == points &&
+          points >= catRange()[cat][0] && points <= catRange()[cat][1] &&
+          n.scores[other] == s.scores[other] &&
+          n.turn.drawsUsed == 0 &&
+          (
+            allFilled(n.scores, player, other)
+              ? (n.status == 'finished' && n.currentPlayerIndex == s.currentPlayerIndex && n.round == s.round)
+              : (n.status == 'playing' && n.currentPlayerIndex == 1 - s.currentPlayerIndex &&
+                 n.round == (n.currentPlayerIndex == 0 ? s.round + 1 : s.round))
+          );
+      }
+
+      // Uma jogada válida = forma ok + campos fixos + um dos três tipos acima.
+      function validMove(s, n) {
+        return gameShapeOk(n) && gameFixedKept(s, n) &&
+          (lockMove(s, n) || drawMove(s, n) || scoreMove(s, n));
+      }
+
+      // ============================================= regras que valem sempre
 
       // hostUid, guestUid, players (apelidos), mode, timerEnabled e createdAt
-      // nunca mudam depois de criados. (O guestUid é "criado" uma única vez,
+      // nunca mudam depois de criados. (O guestUid é preenchido uma única vez,
       // quando o amigo entra — isso é tratado em joining(), separado.)
       function fixedFieldsKept() {
         return !changed().hasAny(['hostUid', 'guestUid', 'players', 'mode', 'timerEnabled', 'createdAt']);
@@ -101,73 +346,70 @@ service cloud.firestore {
         );
       }
 
-      // updatedAt só pode receber o horário do servidor.
-      function updatedAtOk() {
-        return !changed().hasAny(['updatedAt']) || incoming().updatedAt == request.time;
+      // updatedAt só pode receber o horário do servidor; expireAt, se mudar,
+      // tem que ser "agora + 24 h".
+      function timesOk() {
+        return (!changed().hasAny(['updatedAt']) || incoming().updatedAt == request.time) &&
+          (!changed().hasAny(['expireAt']) || expireAtOk());
       }
 
-      // Toda gravação que muda o jogo sobe o contador rev em exatamente 1
+      // Toda gravação que muda o jogo sobe o contador rev em EXATAMENTE 1
       // (duas gravações baseadas no mesmo estado não passam as duas).
       function revBumped() {
-        return incoming().rev == stored().rev + 1;
+        return incoming().rev is int && incoming().rev == stored().rev + 1;
       }
 
-      // O jogo gravado tem 2 jogadores e a vez é de um dos membros.
-      function gameOk() {
-        return incoming().game.currentUid in [stored().hostUid, stored().guestUid] &&
-          incoming().game.players.size() == 2;
-      }
-
-      // -------------------------------------------------- ações permitidas
+      // ================================================== ações permitidas
 
       // ENTRAR: quem não é membro preenche guestUid com o próprio uid, só se a
-      // vaga estava vazia, a sala está em espera e teve atividade nas últimas
-      // 24 h. Junto, só pode gravar o próprio apelido e a própria presença.
+      // vaga estava vazia, a sala está em espera e não expirou. Junto, só pode
+      // gravar o próprio apelido, a própria presença e renovar o expireAt.
       function joining() {
         return !isMember() &&
           stored().status == 'waiting' &&
           stored().guestUid == null &&
-          request.time < stored().updatedAt + duration.value(24, 'h') &&
-          onlyChanged(['guestUid', 'players', 'presence', 'updatedAt']) &&
+          notExpired() &&
+          onlyChanged(['guestUid', 'players', 'presence', 'updatedAt', 'expireAt']) &&
           incoming().guestUid == me() &&
           incoming().players.diff(stored().players).affectedKeys().hasOnly([me()]) &&
           incoming().players[me()].keys().hasOnly(['name']) &&
           validName(incoming().players[me()].name) &&
           incoming().presence.diff(stored().presence).affectedKeys().hasOnly([me()]) &&
           incoming().presence[me()] == request.time &&
-          incoming().updatedAt == request.time;
+          incoming().updatedAt == request.time &&
+          timesOk();
       }
 
-      // SINAL DE VIDA: membro atualiza só a própria presença (a cada 20 s).
+      // SINAL DE VIDA: membro atualiza só a própria presença.
       function heartbeatOnly() {
         return onlyChanged(['presence']);
       }
 
       // COMEÇAR: só o anfitrião, com a sala em espera e o convidado presente.
-      // A sala passa a 'playing', partida nº 1, rev + 1.
+      // A sala passa a 'playing', partida nº 1, rev + 1, com um jogo novo válido.
       function starting() {
         return isHost() &&
           stored().status == 'waiting' &&
           stored().guestUid != null &&
-          onlyChanged(['status', 'game', 'rev', 'match', 'presence', 'updatedAt']) &&
+          onlyChanged(['status', 'game', 'rev', 'match', 'presence', 'updatedAt', 'expireAt']) &&
           incoming().status == 'playing' &&
           incoming().match == 1 &&
           revBumped() &&
-          gameOk();
+          expireAtOk() &&
+          newGameOk(incoming().game);
       }
 
-      // JOGADA: só quem é o currentUid ATUAL (antes da gravação) altera o game.
-      // A sala só vira 'finished' junto com o fim da partida no próprio game.
+      // JOGADA: só quem é o currentUid ATUAL (antes da gravação) altera o game,
+      // com rev + 1, expireAt renovado e uma jogada válida (cadeado, tirada ou
+      // marcação). A sala só vira 'finished' junto com o fim do próprio game.
       function playingMove() {
         return stored().status == 'playing' &&
           stored().game.currentUid == me() &&
-          onlyChanged(['game', 'rev', 'status', 'presence', 'updatedAt']) &&
+          onlyChanged(['game', 'rev', 'status', 'presence', 'updatedAt', 'expireAt']) &&
           revBumped() &&
-          gameOk() &&
-          (
-            (incoming().status == 'playing' && incoming().game.status == 'playing') ||
-            (incoming().status == 'finished' && incoming().game.status == 'finished')
-          );
+          expireAtOk() &&
+          validMove(stored().game, incoming().game) &&
+          incoming().status == incoming().game.status;
       }
 
       // PEDIR REVANCHE: com a partida terminada, o membro grava só o próprio voto.
@@ -176,24 +418,25 @@ service cloud.firestore {
           onlyChanged(['rematch', 'presence', 'updatedAt']);
       }
 
-      // REVANCHE: com a partida terminada, quem vota por último recomeça —
-      // desde que o OUTRO já tenha votado nesta partida. Partida nº + 1,
-      // rev + 1, e o abandono anterior (se houve) é apagado.
+      // REVANCHE: com a partida terminada, quem vota por último recomeça — desde
+      // que o OUTRO já tenha votado nesta partida. Partida nº + 1, rev + 1, jogo
+      // novo válido, e o abandono anterior (se houve) é apagado.
       function restarting() {
         return stored().status == 'finished' &&
-          onlyChanged(['status', 'game', 'rev', 'match', 'rematch', 'forfeitUid', 'presence', 'updatedAt']) &&
+          onlyChanged(['status', 'game', 'rev', 'match', 'rematch', 'forfeitUid', 'presence', 'updatedAt', 'expireAt']) &&
           incoming().status == 'playing' &&
           incoming().match == stored().match + 1 &&
           revBumped() &&
-          gameOk() &&
+          expireAtOk() &&
+          newGameOk(incoming().game) &&
           incoming().rematch[me()] == stored().match &&
           incoming().rematch.get(opponent(), -1) == stored().match &&
           incoming().forfeitUid == null;
       }
 
-      // ABANDONO: durante a partida, um membro encerra se o OUTRO está sem
-      // sinal de vida há mais de 2 minutos (conferido com o relógio do
-      // servidor). O game não muda; forfeitUid aponta quem abandonou.
+      // ABANDONO: durante a partida, um membro encerra se o OUTRO está sem sinal
+      // de vida há mais de 2 minutos (conferido com o relógio do servidor). O
+      // game não muda; forfeitUid aponta quem abandonou.
       function forfeiting() {
         return stored().status == 'playing' &&
           onlyChanged(['status', 'forfeitUid', 'presence', 'updatedAt']) &&
@@ -202,33 +445,32 @@ service cloud.firestore {
           request.time > stored().presence.get(opponent(), stored().updatedAt) + duration.value(2, 'm');
       }
 
-      // ------------------------------------------------------------- regras
+      // ============================================================= regras
 
-      // LER uma sala (get): precisa estar logado e ser membro — ou a sala
-      // estar em espera, para quem tem o código conseguir entrar. Ler um
-      // código que não existe (resource == null) é permitido: é assim que a
-      // tela diz "sala não existe" e que a criação confere se o código está livre.
+      // LER uma sala (get): precisa estar logado e ser membro — ou a sala estar
+      // em espera, para quem tem o código conseguir entrar. Ler um código que
+      // não existe (resource == null) é permitido: é assim que a tela diz "sala
+      // não existe" e que a criação confere se o código está livre.
       allow get: if signedIn() &&
         (resource == null || isMember() || resource.data.status == 'waiting');
 
       // LISTAR a coleção: ninguém (não dá para descobrir códigos de outras salas).
       allow list: if false;
 
-      // CRIAR: logado, código válido no id, eu sou o anfitrião, vaga do
-      // convidado vazia, sala em espera, sem jogo, contadores zerados,
-      // horários do servidor e só os campos esperados.
+      // CRIAR: logado, código válido no id, eu sou o anfitrião, apelido de 1 a 16,
+      // modo existente, vaga do convidado vazia, sala em espera, sem jogo,
+      // contadores zerados, horários do servidor, expireAt = agora + 24 h e
+      // exatamente os campos esperados.
       allow create: if signedIn() &&
         validCode() &&
-        incoming().keys().hasOnly(['hostUid', 'guestUid', 'players', 'mode', 'timerEnabled', 'status',
-          'createdAt', 'updatedAt', 'rev', 'match', 'game', 'presence', 'rematch', 'forfeitUid']) &&
-        incoming().keys().hasAll(['hostUid', 'guestUid', 'players', 'mode', 'timerEnabled', 'status',
-          'createdAt', 'updatedAt', 'rev', 'match', 'game', 'presence', 'rematch', 'forfeitUid']) &&
+        incoming().keys().hasOnly(roomKeys()) &&
+        incoming().keys().hasAll(roomKeys()) &&
         incoming().hostUid == me() &&
         incoming().guestUid == null &&
         incoming().players.keys().hasOnly([me()]) &&
         incoming().players[me()].keys().hasOnly(['name']) &&
         validName(incoming().players[me()].name) &&
-        validMode(incoming().mode) &&
+        incoming().mode in modes() &&
         incoming().timerEnabled is bool &&
         incoming().status == 'waiting' &&
         incoming().game == null &&
@@ -236,28 +478,32 @@ service cloud.firestore {
         incoming().match == 0 &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
+        expireAtOk() &&
         incoming().presence.keys().hasOnly([me()]) &&
         incoming().presence[me()] == request.time &&
         incoming().rematch.size() == 0 &&
         incoming().forfeitUid == null;
 
-      // ATUALIZAR: entrar na sala (não membro), ou — só membros — uma das
-      // ações acima, sempre respeitando os campos fixos, a presença própria,
-      // o voto próprio e o updatedAt do servidor.
-      allow update: if signedIn() && (
-        joining() ||
+      // ATUALIZAR: sem campos extras; entrar na sala (não membro) ou — só
+      // membros — uma das ações acima, sempre respeitando os campos fixos, a
+      // presença própria, o voto próprio e os horários.
+      allow update: if signedIn() &&
+        incoming().keys().hasOnly(roomKeys()) &&
         (
-          isMember() &&
-          fixedFieldsKept() &&
-          presenceOk() &&
-          rematchOk() &&
-          updatedAtOk() &&
-          (heartbeatOnly() || starting() || playingMove() || votingRematch() || restarting() || forfeiting())
-        )
-      );
+          joining() ||
+          (
+            isMember() &&
+            fixedFieldsKept() &&
+            presenceOk() &&
+            rematchOk() &&
+            timesOk() &&
+            (heartbeatOnly() || starting() || playingMove() || votingRematch() || restarting() || forfeiting())
+          )
+        );
 
-      // APAGAR pelo cliente: nunca. (Salas paradas há 24 h são ignoradas pelo
-      // jogo; dá para limpá-las pelo console ou com uma política de TTL.)
+      // APAGAR pelo cliente: nunca. Salas vencidas (expireAt no passado) são
+      // ignoradas pelo jogo e apagadas pela política de TTL do Firestore, se
+      // estiver ativada (precisa do plano Blaze).
       allow delete: if false;
     }
   }

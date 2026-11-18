@@ -5,7 +5,10 @@ import {
   AWAY_AFTER_MS,
   FORFEIT_AFTER_MS,
   ROOM_MAX_AGE_MS,
+  ROOM_TTL_MS,
   createServerClock,
+  expireAtMillis,
+  isExpired,
   fromGameDoc,
   joinError,
   newRoomDoc,
@@ -91,7 +94,17 @@ describe('joinError', () => {
     expect(joinError(fullRoom({ status: 'finished' }), 'host', NOW)).toBeNull();
   });
 
-  it('sala parada há mais de 24 h expirou', () => {
+  it('sala com expireAt no passado expirou — até para quem é membro', () => {
+    expect(expireAtMillis(NOW)).toBe(NOW + ROOM_TTL_MS);
+    const room = fullRoom({ status: 'playing', expireAt: { toMillis: () => NOW - 1 } });
+    expect(isExpired(room, NOW)).toBe(true);
+    expect(joinError(room, 'guest', NOW)).toBe('expired');
+    expect(joinError(waitingRoom({ expireAt: NOW + 1000 }), 'guest', NOW)).toBeNull();
+    // expireAt manda mais que updatedAt
+    expect(joinError(waitingRoom({ expireAt: NOW + 1000, updatedAt: NOW - ROOM_MAX_AGE_MS * 2 }), 'guest', NOW)).toBeNull();
+  });
+
+  it('sala antiga sem expireAt: vale updatedAt + 24 h', () => {
     const old = waitingRoom({ updatedAt: NOW - ROOM_MAX_AGE_MS - 1 });
     expect(joinError(old, 'guest', NOW)).toBe('expired');
     expect(joinError(waitingRoom({ updatedAt: { toMillis: () => NOW - 1000 } }), 'guest', NOW)).toBeNull();

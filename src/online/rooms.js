@@ -1,12 +1,17 @@
 /**
  * Salas no Firestore (rooms/{code}). Toda gravação que muda o jogo é feita com
  * transação, conferindo o `rev` (ver roomState.js e firestore.rules).
+ *
+ * Toda gravação também atualiza o meu lastSeen (presence) e, as que mudam o
+ * jogo, o `expireAt` (agora + 24 h). Assim o heartbeat só precisa gravar
+ * quando o jogador ficou parado (ver `msSinceLastWrite`).
  */
-import { doc, onSnapshot, runTransaction, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { Timestamp, doc, onSnapshot, runTransaction, serverTimestamp, updateDoc } from 'firebase/firestore';
 import { db } from './firebase.js';
 import { generateRoomCode } from './roomCode.js';
 import {
   JOIN_ERROR_MESSAGES,
+  expireAtMillis,
   isMember,
   joinError,
   newRoomDoc,
@@ -20,6 +25,18 @@ import {
 const MAX_CODE_ATTEMPTS = 10;
 
 const roomRef = (code) => doc(db, 'rooms', code);
+
+/** Vencimento a gravar: agora + 24 h (as regras aceitam de 12 h a 36 h, por causa do relógio local). */
+const freshExpireAt = () => Timestamp.fromMillis(expireAtMillis(Date.now()));
+
+/** Última gravação minha em cada sala (para pular heartbeats desnecessários). */
+const lastWriteAt = new Map();
+const markWrite = (code) => lastWriteAt.set(code, Date.now());
+
+export function msSinceLastWrite(code) {
+  const at = lastWriteAt.get(code);
+  return at === undefined ? Infinity : Date.now() - at;
+}
 
 /** Erro com mensagem para o jogador (`code`: 'not_found', 'full', …). */
 export class RoomError extends Error {
@@ -39,16 +56,25 @@ export class ConflictError extends Error {
 
 const isDenied = (error) => error?.code === 'permission-denied';
 
+/** Erros que significam "sem internet / servidor fora do alcance". */
+export function isNetworkError(error) {
+  return ['unavailable', 'deadline-exceeded', 'auth/network-request-failed'].includes(error?.code) ||
+    (typeof navigator !== 'undefined' && navigator.onLine === false);
+}
+
 /** Mensagem em português para erros do Firestore. */
 export function roomErrorMessage(error) {
   if (error instanceof RoomError) return error.message;
+  if (isNetworkError(error)) {
+    return 'Sem conexão com a internet. Verifique a rede; o jogo tenta de novo sozinho quando ela voltar.';
+  }
   switch (error?.code) {
     case 'permission-denied':
-      return 'Sem permissão para essa sala. (As regras do Firestore foram publicadas?)';
-    case 'unavailable':
-      return 'Sem conexão com o servidor. Verifique a internet e tente de novo.';
+      return 'O servidor recusou essa ação. (Se acabou de publicar as regras, recarregue a página.)';
     case 'unauthenticated':
       return 'Sua sessão expirou. Entre de novo.';
+    case 'resource-exhausted':
+      return 'O limite diário gratuito do servidor acabou. Tente de novo amanhã.';
     default:
       return 'Algo deu errado. Tente de novo.';
   }
@@ -73,25 +99,28 @@ export async function createRoom({ uid, name, modeId, timerEnabled }) {
           throw error;
         }
         if (snap.exists()) return false;
-        tx.set(ref, newRoomDoc({ uid, name, modeId, timerEnabled, now: serverTimestamp() }));
+        tx.set(ref, newRoomDoc({ uid, name, modeId, timerEnabled, now: serverTimestamp(), expireAt: freshExpireAt() }));
         return true;
       });
     } catch (error) {
       if (isDenied(error) && attempt < MAX_CODE_ATTEMPTS - 1) continue;
       throw error;
     }
-    if (free) return code;
+    if (free) {
+      markWrite(code);
+      return code;
+    }
   }
   throw new RoomError('no_code', 'Não foi possível gerar um código de sala. Tente de novo.');
 }
 
 /**
  * Entra na sala como convidado (ou volta para ela, se já for membro).
- * Lança RoomError com a mensagem certa: não existe, cheia, já começou…
+ * Lança RoomError com a mensagem certa: não existe, expirou, cheia, já começou…
  */
-export function joinRoom(code, { uid, name }) {
+export async function joinRoom(code, { uid, name }) {
   const ref = roomRef(code);
-  return runTransaction(db, async (tx) => {
+  await runTransaction(db, async (tx) => {
     let snap;
     try {
       snap = await tx.get(ref);
@@ -109,15 +138,17 @@ export function joinRoom(code, { uid, name }) {
         [`players.${uid}`]: { name },
         [`presence.${uid}`]: serverTimestamp(),
         updatedAt: serverTimestamp(),
+        expireAt: freshExpireAt(),
       });
     }
   });
+  markWrite(code);
 }
 
 /** Anfitrião começa a 1ª partida (quem começa é sorteado). */
-export function startMatch(code, uid) {
+export async function startMatch(code, uid) {
   const ref = roomRef(code);
-  return runTransaction(db, async (tx) => {
+  await runTransaction(db, async (tx) => {
     const room = (await tx.get(ref)).data();
     if (!room || room.status !== 'waiting') return;
     if (room.hostUid !== uid) throw new RoomError('not_host', 'Só quem criou a sala pode começar.');
@@ -129,45 +160,53 @@ export function startMatch(code, uid) {
       match: 1,
       [`presence.${uid}`]: serverTimestamp(),
       updatedAt: serverTimestamp(),
+      expireAt: freshExpireAt(),
     });
   });
+  markWrite(code);
 }
 
 /**
  * Grava o estado da partida (só o jogador da vez). Confere o `rev`: se mudou
  * no meio, lança ConflictError com a sala do servidor. Devolve o novo rev.
  */
-export function commitGame(code, uid, state, expectedRev) {
+export async function commitGame(code, uid, state, expectedRev) {
   const ref = roomRef(code);
-  return runTransaction(db, async (tx) => {
+  const rev = await runTransaction(db, async (tx) => {
     const snap = await tx.get(ref);
     const room = snap.data();
     if (!room || room.rev !== expectedRev || room.status !== 'playing' || room.game?.currentUid !== uid) {
       throw new ConflictError(room ?? null);
     }
-    const rev = expectedRev + 1;
     tx.update(ref, {
       game: toGameDoc(state),
-      rev,
+      rev: expectedRev + 1,
       status: state.status === 'finished' ? 'finished' : 'playing',
       [`presence.${uid}`]: serverTimestamp(),
       updatedAt: serverTimestamp(),
+      expireAt: freshExpireAt(),
     });
-    return rev;
+    return expectedRev + 1;
   });
+  markWrite(code);
+  return rev;
 }
 
 /**
  * Pede revanche. Se o outro já pediu, a mesma transação recomeça a partida
  * (começa quem não começou a anterior).
  */
-export function voteRematch(code, uid) {
+export async function voteRematch(code, uid) {
   const ref = roomRef(code);
-  return runTransaction(db, async (tx) => {
+  await runTransaction(db, async (tx) => {
     const room = (await tx.get(ref)).data();
     if (!room || room.status !== 'finished') return;
     const { theirs } = rematchInfo(room, uid);
-    const vote = { [`rematch.${uid}`]: room.match, updatedAt: serverTimestamp() };
+    const vote = {
+      [`rematch.${uid}`]: room.match,
+      [`presence.${uid}`]: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    };
     if (!theirs) {
       tx.update(ref, vote);
       return;
@@ -179,39 +218,47 @@ export function voteRematch(code, uid) {
       rev: room.rev + 1,
       match: room.match + 1,
       forfeitUid: null,
+      expireAt: freshExpireAt(),
     });
   });
+  markWrite(code);
 }
 
 /** Encerra por abandono (o outro sumiu há mais de 2 min; as regras conferem o horário). */
-export function forfeit(code, uid) {
+export async function forfeit(code, uid) {
   const ref = roomRef(code);
-  return runTransaction(db, async (tx) => {
+  await runTransaction(db, async (tx) => {
     const room = (await tx.get(ref)).data();
     if (!room || room.status !== 'playing') return;
     tx.update(ref, {
       status: 'finished',
       forfeitUid: otherUid(room, uid),
+      [`presence.${uid}`]: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
   });
+  markWrite(code);
 }
 
 /** Sinal de vida (lastSeen) do jogador na sala. */
-export function heartbeat(code, uid) {
-  return updateDoc(roomRef(code), { [`presence.${uid}`]: serverTimestamp() });
+export async function heartbeat(code, uid) {
+  await updateDoc(roomRef(code), { [`presence.${uid}`]: serverTimestamp() });
+  markWrite(code);
 }
 
 /**
- * Acompanha a sala em tempo real. `onRoom(room | null, { pending })`, onde
- * `room` traz `code` e os horários pendentes vêm estimados.
+ * Acompanha a sala em tempo real. `onRoom(room | null, { pending, fromCache })`,
+ * onde `room` traz `code` e os horários pendentes vêm estimados. Com
+ * includeMetadataChanges, também avisa quando a conexão cai ou volta
+ * (`fromCache` muda) — mudanças só de metadados não contam como leitura.
  */
 export function watchRoom(code, onRoom, onError) {
   return onSnapshot(
     roomRef(code),
+    { includeMetadataChanges: true },
     (snap) => {
       const room = snap.exists() ? { code, ...snap.data({ serverTimestamps: 'estimate' }) } : null;
-      onRoom(room, { pending: snap.metadata.hasPendingWrites });
+      onRoom(room, { pending: snap.metadata.hasPendingWrites, fromCache: snap.metadata.fromCache });
     },
     onError,
   );

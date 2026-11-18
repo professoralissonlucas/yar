@@ -11,13 +11,16 @@
  */
 import { h } from '../ui/dom.js';
 import { showTable } from '../ui/screens/table.js';
-import { createPushQueue } from './pushQueue.js';
+import { createPushQueue, sameStep } from './pushQueue.js';
 import { fromGameDoc, otherUid, playerName } from './roomState.js';
-import { ConflictError, commitGame, forfeit, roomErrorMessage } from './rooms.js';
+import { ConflictError, commitGame, forfeit, isNetworkError, roomErrorMessage } from './rooms.js';
 
 function classify(error) {
   if (error instanceof ConflictError) return 'conflict';
-  if (['permission-denied', 'invalid-argument', 'unauthenticated', 'not-found'].includes(error?.code)) return 'fatal';
+  if (isNetworkError(error)) return 'retry';
+  if (['permission-denied', 'invalid-argument', 'unauthenticated', 'not-found', 'resource-exhausted'].includes(error?.code)) {
+    return 'fatal';
+  }
   return 'retry';
 }
 
@@ -41,7 +44,7 @@ function createBanner({ onForfeit }) {
       message = error;
       kind = 'error';
     } else if (saving === 'retry') {
-      message = 'Sem conexão… tentando salvar a jogada.';
+      message = 'Reconectando… sua jogada será enviada quando a conexão voltar.';
     } else if (opponent.status === 'gone') {
       message = `${opponent.name} está desconectado há mais de 2 minutos.`;
     } else if (opponent.status === 'away') {
@@ -121,6 +124,7 @@ export function startOnlineMatch(root, { room, uid, onExit, onGameOver }) {
   const queue = createPushQueue({
     initialRev: room.rev,
     commit: (state, expectedRev) => commitGame(code, uid, state, expectedRev),
+    canMerge: sameStep, // só cliques de cadeado viram uma gravação só
     classify,
     onConflict: (error) => resyncFromServer(error.room ? { code, ...error.room } : lastRoom),
     onFatal: (error) => {

@@ -157,33 +157,88 @@
   user-select: all;
 }
 
-.copy-row {
-  display: flex;
-  flex-wrap: wrap;
+/* "Só o código" / "Link do convite": rótulo, valor e botão de copiar */
+.copy-lines {
+  display: grid;
+  gap: var(--space-1);
+  width: 100%;
+  max-width: 520px;
+}
+
+.copy-line {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: center;
+  gap: 4px var(--space-1);
+  padding: var(--space-1) var(--space-1) var(--space-1) var(--space-2);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.06);
+  text-align: left;
+}
+
+.copy-line__label {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.copy-line__value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.copy-line__value--code {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+}
+
+.copy-line__value--link {
+  color: var(--muted);
+  font-size: var(--fs-small);
+}
+
+.copy-line__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
   gap: var(--space-1);
 }
 
 .copy-status {
   color: var(--preview);
   font-size: var(--fs-small);
+  font-weight: 600;
 }
 
-/* sem mensagem, o botão fica centralizado */
 .copy-status:empty {
   display: none;
 }
 
-.invite-link {
+.copy-fallback {
+  grid-column: 1 / -1;
   width: 100%;
-  max-width: 460px;
   min-height: 40px;
   padding: 0 var(--space-1);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius);
   background: var(--surface-strong);
   font-size: var(--fs-small);
+}
+
+@media (max-width: 520px) {
+  /* no celular: rótulo e valor em cima, botão embaixo */
+  .copy-line {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .copy-line__action {
+    justify-content: flex-start;
+  }
 }
 
 .room-players {
@@ -289,4 +344,33 @@
   color: var(--gold-strong);
   font-weight: 600;
   text-align: center;
+}
+
+/* ---------- aviso de conexão (todas as telas online) ---------- */
+
+.connection-toast {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  left: 50%;
+  z-index: 200; /* acima dos avisos de turno e diálogos */
+  max-width: calc(100vw - 32px);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-pill);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+  font-size: var(--fs-small);
+  font-weight: 700;
+  text-align: center;
+  transform: translateX(-50%);
+}
+
+.connection-toast--offline {
+  background: #5b1f1a;
+  border: 1px solid var(--danger);
+  color: #ffd2cd;
+}
+
+.connection-toast--online {
+  background: #154a35;
+  border: 1px solid var(--preview);
+  color: var(--preview);
 }

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { createSeededRng } from '../../src/core/rng.js';
 import {
   ROOM_CODE_ALPHABET,
+  extractRoomCode,
   generateRoomCode,
   inviteUrl,
   isValidRoomCode,
@@ -53,6 +54,30 @@ describe('normalizeRoomCode / isValidRoomCode', () => {
     expect(isValidRoomCode('ABC2340')).toBe(false);
     expect(isValidRoomCode('ABCO23')).toBe(false);
     expect(isValidRoomCode(undefined)).toBe(false);
+  });
+});
+
+describe('extractRoomCode (campo "Entrar com código")', () => {
+  it('aceita o link do convite inteiro', () => {
+    expect(extractRoomCode('https://professoralissonlucas.github.io/yar/?sala=ABC234')).toBe('ABC234');
+    expect(extractRoomCode(inviteUrl('K7PX4M'))).toBe('K7PX4M');
+  });
+
+  it('acha o código no meio de um texto ou com outros parâmetros', () => {
+    expect(extractRoomCode('bora jogar? https://x.dev/yar/?sala=abc234 vem')).toBe('ABC234');
+    expect(extractRoomCode('https://x.dev/yar/?utm=zap&sala=abc-234&y=1')).toBe('ABC234');
+    expect(extractRoomCode('localhost:5173/yar/#x?SALA=k7px4m')).toBe('K7PX4M');
+  });
+
+  it('sem link, trata o texto como o código', () => {
+    expect(extractRoomCode(' abc 234 ')).toBe('ABC234');
+    expect(extractRoomCode('ABC234')).toBe('ABC234');
+    expect(extractRoomCode('')).toBe('');
+    expect(extractRoomCode(null)).toBe('');
+  });
+
+  it('link sem código vira vazio (não pega letras da URL)', () => {
+    expect(extractRoomCode('https://professoralissonlucas.github.io/yar/?sala=')).toBe('');
   });
 });
 

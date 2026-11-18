@@ -19,28 +19,43 @@ async function copyText(text, fallbackInput) {
 }
 
 /**
- * Sala de espera: código grande, "Copiar convite", quem está na sala e
- * "Começar" (só o anfitrião, quando o amigo já entrou).
+ * Linha "o que é · valor · botão de copiar". O aviso ("copiado!") é de cada linha,
+ * para ficar claro o que foi para a área de transferência.
+ */
+function copyLine({ label, value, display, buttonText, doneText, valueClass }) {
+  const status = h('span', { class: 'copy-status', role: 'status' });
+  const fallback = h('input', { type: 'text', class: 'copy-fallback', value, readonly: true, 'aria-label': label });
+  fallback.hidden = true;
+  const button = h(
+    'button',
+    {
+      type: 'button',
+      class: 'btn btn--ghost btn--small',
+      onClick: async () => {
+        const ok = await copyText(value, fallback);
+        status.textContent = ok ? doneText : 'Selecione e copie:';
+        if (ok) setTimeout(() => (status.textContent = ''), 2500);
+      },
+    },
+    buttonText,
+  );
+  return h(
+    'div',
+    { class: 'copy-line' },
+    h('span', { class: 'copy-line__label' }, label),
+    h('span', { class: `copy-line__value ${valueClass}` }, display),
+    h('span', { class: 'copy-line__action' }, button, status),
+    fallback,
+  );
+}
+
+/**
+ * Sala de espera: código grande, "Copiar código" e "Copiar link do convite",
+ * quem está na sala e "Começar" (só o anfitrião, quando o amigo já entrou).
  * Devolve { update(room, { uid, opponentStatus }) }.
  */
 export function showWaitingRoom(root, { code, account, onLeave, onStart }) {
   const link = inviteUrl(code);
-  const copyStatus = h('span', { class: 'copy-status', role: 'status' });
-  const linkInput = h('input', { type: 'text', class: 'invite-link', value: link, readonly: true, 'aria-label': 'Link do convite' });
-  linkInput.hidden = true;
-  const copyButton = h(
-    'button',
-    {
-      type: 'button',
-      class: 'btn btn--ghost',
-      onClick: async () => {
-        const ok = await copyText(link, linkInput);
-        copyStatus.textContent = ok ? 'Convite copiado!' : 'Copie o link abaixo:';
-        if (ok) setTimeout(() => (copyStatus.textContent = ''), 2500);
-      },
-    },
-    'Copiar convite',
-  );
   const modeLine = h('p', { class: 'muted' });
   const playersEl = h('ul', { class: 'room-players' });
   const statusEl = h('p', { class: 'room-status', role: 'status', 'aria-live': 'polite' });
@@ -78,9 +93,31 @@ export function showWaitingRoom(root, { code, account, onLeave, onStart }) {
         { class: 'panel online-card stack room-card' },
         h('p', { class: 'kicker' }, 'Código da sala'),
         h('p', { class: 'room-code', 'aria-label': `Código ${code.split('').join(' ')}` }, code),
-        h('div', { class: 'copy-row' }, copyButton, copyStatus),
-        linkInput,
-        h('p', { class: 'muted small' }, 'Mande o convite (ou só o código) para o seu amigo.'),
+        h(
+          'div',
+          { class: 'copy-lines' },
+          copyLine({
+            label: 'Só o código',
+            value: code,
+            display: code,
+            buttonText: 'Copiar código',
+            doneText: 'Código copiado!',
+            valueClass: 'copy-line__value--code',
+          }),
+          copyLine({
+            label: 'Link do convite',
+            value: link,
+            display: link.replace(/^https?:\/\//, ''),
+            buttonText: 'Copiar link',
+            doneText: 'Link copiado!',
+            valueClass: 'copy-line__value--link',
+          }),
+        ),
+        h(
+          'p',
+          { class: 'muted small' },
+          'Mande o link (abre direto na sala) ou só o código (o amigo digita em “Entrar com código”).',
+        ),
         modeLine,
       ),
       h('section', { class: 'panel online-card stack' }, h('h2', { class: 'section-title' }, 'Jogadores'), playersEl, statusEl, startButton, error.el),

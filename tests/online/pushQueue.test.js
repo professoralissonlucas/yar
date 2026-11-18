@@ -85,7 +85,7 @@ describe('createPushQueue', () => {
     expect(queue.rev).toBe(7);
   });
 
-  it('erro de rede: tenta de novo (com o estado mais novo, se houver)', async () => {
+  it('erro de rede: tenta de novo e depois grava o que chegou nesse meio-tempo', async () => {
     const { commit, calls } = controlledCommit();
     const onRetry = vi.fn();
     const onSaved = vi.fn();
@@ -100,11 +100,15 @@ describe('createPushQueue', () => {
     queue.push('b');
     calls[1].reject(new Error('offline'));
     await flush();
-    expect(calls[2]).toMatchObject({ state: 'b', expectedRev: 0 });
+    // 'a' é um passo próprio (não é só ajuste): é refeito antes de 'b'
+    expect(calls[2]).toMatchObject({ state: 'a', expectedRev: 0 });
     calls[2].resolve(1);
+    await flush();
+    expect(calls[3]).toMatchObject({ state: 'b', expectedRev: 1 });
+    calls[3].resolve(2);
     await queue.idle();
     expect(onSaved).toHaveBeenCalledTimes(1);
-    expect(queue.rev).toBe(1);
+    expect(queue.rev).toBe(2);
   });
 
   it('erro fatal (regras recusaram) para e avisa', async () => {
@@ -164,5 +168,77 @@ describe('createPushQueue', () => {
     await queue.idle();
     expect(commit).toHaveBeenCalledTimes(4);
     expect(onFatal).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('createPushQueue com canMerge (online: só cadeados se juntam)', () => {
+  it('passos diferentes são gravados em ordem, um por um', async () => {
+    const { commit, calls } = controlledCommit();
+    const canMerge = (a, b) => b.step === 'lock'; // "só cadeado" em relação ao anterior
+    const queue = createPushQueue({ commit, initialRev: 0, wait: noWait, canMerge });
+
+    queue.push({ step: 'draw1' });
+    queue.push({ step: 'lock', n: 1 });
+    queue.push({ step: 'lock', n: 2 }); // junta com o cadeado anterior
+    queue.push({ step: 'draw2' });
+    queue.push({ step: 'score' });
+    expect(queue.pendingCount).toBe(3);
+
+    for (let i = 0; i < 4; i++) {
+      calls[i].resolve(i + 1);
+      await flush();
+    }
+    await queue.idle();
+    expect(calls.map((c) => c.state)).toEqual([
+      { step: 'draw1' },
+      { step: 'lock', n: 2 },
+      { step: 'draw2' },
+      { step: 'score' },
+    ]);
+    expect(calls.map((c) => c.expectedRev)).toEqual([0, 1, 2, 3]);
+  });
+
+  it('erro de rede no meio: refaz o mesmo passo e mantém a ordem', async () => {
+    const { commit, calls } = controlledCommit();
+    const queue = createPushQueue({ commit, initialRev: 0, wait: noWait, canMerge: (a, b) => a === b });
+    queue.push('draw');
+    queue.push('score');
+    calls[0].reject(new Error('offline'));
+    await flush();
+    expect(calls[1].state).toBe('draw');
+    calls[1].resolve(1);
+    await flush();
+    expect(calls[2]).toMatchObject({ state: 'score', expectedRev: 1 });
+    calls[2].resolve(2);
+    await queue.idle();
+  });
+});
+
+describe('ajustes nunca entram numa tirada que espera na fila', () => {
+  it('tirada pendente + cadeados: a tirada vai sozinha e os cadeados juntos depois', async () => {
+    const { plannedWrites } = await import('../../src/online/pushQueue.js');
+    const isLock = (a, b) => b.startsWith('lock');
+    expect(plannedWrites(['draw', 'lock1', 'lock2', 'draw2', 'lock3', 'score'], isLock)).toEqual([
+      'draw',
+      'lock2',
+      'draw2',
+      'lock3',
+      'score',
+    ]);
+  });
+});
+
+describe('sameStep', () => {
+  it('só cadeados mudaram → mesmo passo; tirada ou marcação → passo novo', async () => {
+    const { createGame, draw, scoreTurn, toggleLock } = await import('../../src/core/game.js');
+    const { createSeededRng } = await import('../../src/core/rng.js');
+    const { sameStep } = await import('../../src/online/pushQueue.js');
+    const rng = createSeededRng(1);
+    const s0 = createGame({ modeId: 'basic', players: [{ id: 'a', name: 'A' }, { id: 'b', name: 'B' }] });
+    const s1 = draw(s0, rng);
+    expect(sameStep(s1, toggleLock(s1, 0))).toBe(true);
+    expect(sameStep(s0, s1)).toBe(false);
+    expect(sameStep(s1, draw(toggleLock(s1, 0), rng))).toBe(false);
+    expect(sameStep(s1, scoreTurn(s1, 'ones'))).toBe(false);
   });
 });

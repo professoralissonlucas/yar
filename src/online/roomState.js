@@ -4,9 +4,12 @@
  * {
  *   hostUid, guestUid (null até o amigo entrar), players: { uid: { name } },
  *   mode, timerEnabled, status: 'waiting' | 'playing' | 'finished',
- *   createdAt, updatedAt, rev, match, game, presence: { uid: Timestamp },
+ *   createdAt, updatedAt, expireAt, rev, match, game, presence: { uid: Timestamp },
  *   rematch: { uid: match }, forfeitUid
  * }
+ *
+ * - `expireAt`: agora + 24 h, renovado a cada jogada. Salas expiradas não aceitam
+ *   entrada e podem ser apagadas pela política de TTL do Firestore.
  *
  * - `game`: o estado de src/core/game.js (mesmo formato de createGame) +
  *   `currentUid` (o id do jogador da vez, para as regras de segurança).
@@ -20,7 +23,10 @@ import { createGame, getCurrentPlayer, getTotals, getWinners } from '../core/gam
 import { getMode } from '../core/modes.js';
 
 export const ROOM_MAX_AGE_MS = 24 * 60 * 60 * 1000;
-export const PRESENCE_INTERVAL_MS = 20 * 1000;
+/** Validade da sala a partir da última jogada (campo expireAt). */
+export const ROOM_TTL_MS = ROOM_MAX_AGE_MS;
+/** Sinal de vida (lastSeen); pulado se o jogador gravou algo nesse intervalo. */
+export const PRESENCE_INTERVAL_MS = 30 * 1000;
 export const AWAY_AFTER_MS = 60 * 1000;
 export const FORFEIT_AFTER_MS = 2 * 60 * 1000;
 
@@ -33,8 +39,16 @@ export function toMillis(value) {
   return null;
 }
 
-/** Campos da sala nova. `now` é o horário a gravar (serverTimestamp() no Firebase). */
-export function newRoomDoc({ uid, name, modeId, timerEnabled, now }) {
+/** Quando a sala expira se a última atividade foi agora (milissegundos). */
+export function expireAtMillis(nowMs) {
+  return nowMs + ROOM_TTL_MS;
+}
+
+/**
+ * Campos da sala nova. `now` é o horário a gravar (serverTimestamp() no
+ * Firebase) e `expireAt` o vencimento (Timestamp de agora + 24 h).
+ */
+export function newRoomDoc({ uid, name, modeId, timerEnabled, now, expireAt }) {
   getMode(modeId); // lança se o modo não existir
   return {
     hostUid: uid,
@@ -45,6 +59,7 @@ export function newRoomDoc({ uid, name, modeId, timerEnabled, now }) {
     status: 'waiting',
     createdAt: now,
     updatedAt: now,
+    expireAt,
     rev: 0,
     match: 0,
     game: null,
@@ -64,17 +79,25 @@ export const playerName = (room, uid) => room.players?.[uid]?.name ?? 'Jogador';
 
 /**
  * Pode entrar nesta sala? `null` = pode (ou já é membro e volta para ela).
- * Senão: 'not_found' | 'full' | 'started' | 'finished' | 'expired'.
+ * Senão: 'not_found' | 'expired' | 'full' | 'started' | 'finished'. Sala
+ * expirada é ignorada até por quem é membro.
  */
 export function joinError(room, uid, nowMs) {
   if (!room) return 'not_found';
+  if (isExpired(room, nowMs)) return 'expired';
   if (isMember(room, uid)) return null;
   if (room.status === 'playing') return 'started';
   if (room.status === 'finished') return 'finished';
   if (room.guestUid) return 'full';
-  const updated = toMillis(room.updatedAt);
-  if (updated !== null && nowMs - updated > ROOM_MAX_AGE_MS) return 'expired';
   return null;
+}
+
+/** Sala vencida: expireAt no passado (salas antigas sem o campo: updatedAt + 24 h). */
+export function isExpired(room, nowMs) {
+  const expire = toMillis(room.expireAt);
+  if (expire !== null) return nowMs > expire;
+  const updated = toMillis(room.updatedAt);
+  return updated !== null && nowMs - updated > ROOM_MAX_AGE_MS;
 }
 
 export const JOIN_ERROR_MESSAGES = {
@@ -82,7 +105,7 @@ export const JOIN_ERROR_MESSAGES = {
   full: 'Essa sala já está cheia.',
   started: 'A partida dessa sala já começou.',
   finished: 'A partida dessa sala já terminou.',
-  expired: 'Essa sala expirou (mais de 24 h sem atividade). Peça um código novo.',
+  expired: 'Essa sala expirou (mais de 24 h sem jogadas). Crie outra ou peça um código novo.',
   invalid: 'O código tem 6 caracteres (letras e números).',
 };
 

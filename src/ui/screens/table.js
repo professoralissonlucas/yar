@@ -1,7 +1,7 @@
 import { CARD_VALUES, HAND_SIZE } from '../../core/deck.js';
 import {
-  applyTimeout,
   canDraw,
+  chooseTimeoutCategory,
   canScore,
   createGame,
   draw,
@@ -279,10 +279,19 @@ export function showTable(
     }
   }
 
+  /**
+   * Tempo esgotado: o mesmo que applyTimeout do core, mas em dois passos
+   * (tirar, se ainda não tirou, e depois marcar) para o online gravar cada um
+   * separado — as regras do Firestore só aceitam marcar uma mão já gravada.
+   */
   function handleTimeout() {
     if (destroyed || busy || state.status !== 'playing') return;
     closeDialogs();
-    finishTurn(applyTimeout(state, rng), { timedOut: true, local: true });
+    if (state.turn.drawsUsed === 0) {
+      state = draw(state, rng);
+      notifyLocal();
+    }
+    finishTurn(scoreTurn(state, chooseTimeoutCategory(state)), { timedOut: true, local: true });
   }
 
   async function onExitClick() {

@@ -1,7 +1,7 @@
 # Yar! — Yahtzee de cartas (web)
 
 Jogo web inspirado no **Yar!** do Black Desert Online: um Yahtzee jogado com cartas numeradas de 1 a 6 em vez de dados.
-Modos: **contra a máquina** (3 níveis de NPC) e **contra um amigo online** (salas com código, via Firebase).
+Modos: **contra a máquina** (o Prof. Alishow, em 3 níveis), **2 jogadores no mesmo computador** e **contra um amigo online** (salas com código, via Firebase).
 Publicado no **GitHub Pages**. Interface e textos em **português do Brasil**.
 
 ---
@@ -120,17 +120,19 @@ Reações do professor (do ponto de vista dele): pensa na vez dele; fica feliz/e
 
 - Todo o código online (`src/online/`, telas em `src/ui/screens/online/`, `src/ui/online.css`) é carregado com **`import()` dinâmico** pelo `app.js`, só quando o jogador escolhe "Online" ou abre um convite (`?sala=CODIGO`). O chunk principal não tem Firebase.
 - **Login** (`src/online/auth.js`): "Entrar com Google" (popup) ou "Jogar como convidado" (anônimo) + apelido (até 16 caracteres; vem preenchido com o último usado ou o 1º nome do Google). Telas online mostram quem está logado e "Sair".
-- **Salas** (`src/online/rooms.js`, puras em `roomCode.js`/`roomState.js`): o anfitrião escolhe modo e timer no lobby e recebe um **código de 6 caracteres** (sem 0/O, 1/I/L), gerado com transação. Sala de espera: código grande, "Copiar convite" (`https://professoralissonlucas.github.io/yar/?sala=CODIGO`), nomes; o anfitrião clica "Começar" e quem começa é sorteado. Membro sempre pode voltar à sala pelo código (a URL fica com `?sala=` enquanto está nela).
-- **Firestore** — coleção `rooms/{code}`:
+- **Salas** (`src/online/rooms.js`, puras em `roomCode.js`/`roomState.js`): o anfitrião escolhe modo e timer no lobby e recebe um **código de 6 caracteres** (sem 0/O, 1/I/L), gerado com transação. Sala de espera: código grande, "Copiar código" (só os 6 caracteres) e "Copiar link" (`https://professoralissonlucas.github.io/yar/?sala=CODIGO`), nomes; o anfitrião clica "Começar" e quem começa é sorteado. O campo "Entrar com código" aceita o código ou o link colado (`extractRoomCode`). Membro pode voltar à sala pelo código (a URL fica com `?sala=` enquanto está nela).
+- **Firestore** — coleção `rooms/{code}` (campos fixos; as regras recusam campos extras):
   - `hostUid`, `guestUid` (null até entrar), `players: { uid: { name } }`, `mode`, `timerEnabled`, `status` (`waiting` | `playing` | `finished`), `createdAt`, `updatedAt`
+  - `expireAt`: agora + 24 h, gravado ao criar e renovado a cada jogada; sala vencida não aceita entrada (nem de membro). Política de TTL do Firestore no campo `expireAt` apaga as salas velhas — **exige o plano Blaze** (deletes de TTL não têm cota grátis)
   - `game`: o estado de `src/core/game.js` (mesmo formato de `createGame`) + `currentUid` (jogador da vez, para as regras)
-  - `rev`: sobe 1 a cada gravação que muda o `game` · `match`: nº da partida na sala (0 antes de começar)
-  - `presence: { uid: Timestamp }` (lastSeen a cada 20 s) · `rematch: { uid: match }` (voto de revanche da partida atual) · `forfeitUid` (quem perdeu por abandono)
-- **Partida** (`src/online/sync.js`): a mesma mesa da partida local, com assentos `controller: 'local'` (eu) e `'remote'` (o amigo); `showTable` recebe `initialState`, `onLocalChange` e devolve `applyRemote`/`resync`. **Somente o jogador da vez** grava, com `runTransaction` conferindo o `rev` (se mudou no meio, descarta e redesenha). Cliques rápidos viram uma gravação só (`pushQueue.js`). As tiradas usam `Math.random` no cliente da vez; o timer (se ligado) é aplicado por quem está na vez.
-- **Presença**: sem sinal há 60 s → "Oponente desconectado"; há 2 min → botão "Encerrar partida" (vitória por abandono, conferida pelas regras com o relógio do servidor).
+  - `rev`: sobe exatamente 1 a cada gravação que muda o `game` · `match`: nº da partida na sala (0 antes de começar)
+  - `presence: { uid: Timestamp }` (lastSeen) · `rematch: { uid: match }` (voto de revanche da partida atual) · `forfeitUid` (quem perdeu por abandono)
+- **Partida** (`src/online/sync.js`): a mesma mesa da partida local, com assentos `controller: 'local'` (eu) e `'remote'` (o amigo); `showTable` recebe `initialState`, `onLocalChange` e devolve `applyRemote`/`resync`. **Somente o jogador da vez** grava, com `runTransaction` conferindo o `rev` (se mudou no meio, descarta e redesenha). A fila (`pushQueue.js`) grava em ordem e só junta cliques de cadeado (`sameStep`); cada tirada e cada marcação é uma gravação própria, e o tempo esgotado grava tirada e marcação separadas — senão as regras recusam. As tiradas usam `Math.random` no cliente da vez; o timer (se ligado) é aplicado por quem está na vez.
+- **Regras** (`firestore.rules`, comentadas): ninguém lista nem apaga salas; só membros leem (ou qualquer logado, se `waiting`); só o `currentUid` atual muda o `game`; campos fixos nunca mudam; cada um só mexe na própria presença e no próprio voto. Validam os dados: tipos e tamanhos (nome ≤ 16, código 6, modo válido, mão de 5 cartas 1–6, 5 cadeados), jogo novo coerente com o modo, `drawsUsed` +1 por vez sem passar do limite, cartas trancadas não mudam, baralho encolhe certo, cada marcação preenche **uma** categoria vazia do próprio jogador dentro da faixa min–max. As tabelas de modos e faixas dentro do `.rules` são conferidas contra o core por teste; `tests/online/rulesMirror.js` é o espelho em JS das regras de jogada (mantenha os dois iguais). Limite: o embaralhamento é do cliente, e os pontos só são conferidos pela faixa.
+- **Presença**: toda gravação atualiza o `lastSeen`; o heartbeat (`PRESENCE_INTERVAL_MS` = 30 s) só grava se o jogador ficou 30 s sem gravar nada, inclusive com a aba oculta. Sem sinal há 60 s → "Oponente desconectado"; há 2 min → botão "Encerrar partida" (vitória por abandono, conferida pelas regras com o relógio do servidor).
+- **Conexão** (`connection.js` + `connectionToast.js`): `navigator.onLine` + `fromCache` dos snapshots → aviso fixo "Sem internet — tentando reconectar…" e "Conexão restabelecida". Jogadas feitas sem rede ficam na fila e são enviadas quando ela volta.
 - **Fim**: resultado com "Revanche" (recomeça na mesma sala quando os dois pedem; começa quem não começou a anterior) e "Sair da sala". Sem o professor no online: cada jogador aparece só com o nome.
-- Autoritativo no cliente (aceitável entre amigos). As regras (`firestore.rules`, comentadas) garantem quem pode mudar o quê: ninguém lista nem apaga salas; só membros leem (ou qualquer logado, se `waiting`); só o `currentUid` atual muda o `game`; campos fixos nunca mudam; cada um só mexe na própria presença e no próprio voto.
-- Salas sem atividade há 24 h não aceitam entrada (podem ser limpas pelo console).
+- **Consumo (plano Spark: 50 mil leituras e 20 mil escritas por dia)**: cada gravação de jogada = 1 leitura (transação) + 1 escrita + 2 leituras (os dois listeners). Partida típica ≈ 6 gravações por turno + ~1 heartbeat por minuto por jogador. Básico (12 turnos, ~5 min) ≈ 90 escritas e 260 leituras → ~190 partidas/dia; Completo (30 turnos, ~12 min) ≈ 210 escritas e 610 leituras → ~80 partidas/dia (o limite são as leituras).
 - A configuração do Firebase (`firebaseConfig`) é pública por natureza e pode ir no repositório; a segurança vem das regras e dos domínios autorizados.
 
 ---

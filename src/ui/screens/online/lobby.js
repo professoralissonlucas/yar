@@ -1,4 +1,4 @@
-import { ROOM_CODE_LENGTH, isValidRoomCode, normalizeRoomCode } from '../../../online/roomCode.js';
+import { extractRoomCode, isValidRoomCode } from '../../../online/roomCode.js';
 import { JOIN_ERROR_MESSAGES } from '../../../online/roomState.js';
 import { h } from '../../dom.js';
 import { renderModePicker, renderTimerSwitch } from '../start.js';
@@ -21,18 +21,20 @@ export function showLobby(root, { account, onBack, initialModeId, initialTimer, 
     type: 'text',
     name: 'code',
     class: 'code-input',
-    value: normalizeRoomCode(initialCode),
-    maxlength: ROOM_CODE_LENGTH + 4, // deixa colar "ABC-123" ou com espaços
+    value: extractRoomCode(initialCode),
+    // sem limite curto: o jogador pode colar o link inteiro do convite
+    maxlength: 500,
     autocomplete: 'off',
     autocapitalize: 'characters',
     spellcheck: 'false',
     inputmode: 'text',
     placeholder: 'ABC234',
-    'aria-label': 'Código da sala (6 caracteres)',
+    'aria-label': 'Código da sala (6 caracteres) ou link do convite',
+    'aria-describedby': `${id}-code-hint`,
     onInput: () => {
       const start = codeInput.selectionStart;
       const before = codeInput.value;
-      codeInput.value = normalizeRoomCode(before);
+      codeInput.value = extractRoomCode(before);
       // mantém o cursor no lugar quando só mudou maiúscula/minúscula
       if (before.length === codeInput.value.length) codeInput.setSelectionRange(start, start);
       updateJoin();
@@ -85,7 +87,7 @@ export function showLobby(root, { account, onBack, initialModeId, initialTimer, 
       novalidate: true,
       onSubmit: (event) => {
         event.preventDefault();
-        const code = normalizeRoomCode(codeInput.value);
+        const code = extractRoomCode(codeInput.value);
         if (!isValidRoomCode(code)) {
           joinErrorLine.set(JOIN_ERROR_MESSAGES.invalid);
           return;
@@ -95,6 +97,7 @@ export function showLobby(root, { account, onBack, initialModeId, initialTimer, 
     },
     h('h2', { class: 'section-title', id: `${id}-join` }, 'Entrar com código'),
     h('div', { class: 'join-row' }, codeInput, joinButton),
+    h('p', { class: 'muted small', id: `${id}-code-hint` }, 'Digite o código de 6 caracteres ou cole o link do convite.'),
     joinErrorLine.el,
   );
 

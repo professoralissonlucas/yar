@@ -8,6 +8,8 @@ import { showLobby } from '../ui/screens/online/lobby.js';
 import { showLogin, showNickname } from '../ui/screens/online/login.js';
 import { showWaitingRoom } from '../ui/screens/online/waitingRoom.js';
 import { onlineHeader } from '../ui/screens/online/common.js';
+import { createConnectionToast } from '../ui/screens/online/connectionToast.js';
+import { createConnectionState } from './connection.js';
 import { showOnlineResult } from '../ui/screens/online/result.js';
 import { startOnlineMatch } from './sync.js';
 import {
@@ -33,6 +35,7 @@ import {
   createRoom,
   heartbeat,
   joinRoom,
+  msSinceLastWrite,
   roomErrorMessage,
   startMatch,
   voteRematch,
@@ -41,6 +44,8 @@ import {
 
 /** Reavalia a presença do outro mesmo sem snapshots novos. */
 const PRESENCE_CHECK_MS = 5000;
+/** De quanto em quanto tempo confere se precisa mandar o sinal de vida. */
+const HEARTBEAT_CHECK_MS = 10 * 1000;
 
 function setRoomInUrl(code) {
   const url = new URL(window.location.href);
@@ -58,6 +63,18 @@ export function startOnline(root, { roomCode, settings, saveSettings, onHome }) 
   let pendingCode = roomCode ? normalizeRoomCode(roomCode) : null;
   let lobbyNotice = null;
 
+  // aviso "Sem internet / Conexão restabelecida" em todas as telas online
+  const toast = createConnectionToast();
+  const connection = createConnectionState({
+    browserOnline: navigator.onLine !== false,
+    onChange: (status) => toast.set(status),
+  });
+  const onBrowserOnline = () => connection.setBrowserOnline(true);
+  const onBrowserOffline = () => connection.setBrowserOnline(false);
+  window.addEventListener('online', onBrowserOnline);
+  window.addEventListener('offline', onBrowserOffline);
+  if (connection.status === 'offline') toast.set('offline');
+
   const account = () => ({ user, nickname, onSignOut: signOut });
 
   function leaveOnline() {
@@ -65,6 +82,9 @@ export function startOnline(root, { roomCode, settings, saveSettings, onHome }) 
     session = null;
     stopAuth?.();
     stopAuth = null;
+    window.removeEventListener('online', onBrowserOnline);
+    window.removeEventListener('offline', onBrowserOffline);
+    toast.destroy();
     setRoomInUrl(null);
     onHome();
   }
@@ -179,16 +199,22 @@ export function startOnline(root, { roomCode, settings, saveSettings, onHome }) 
     let closed = false;
     let finishedMatch = 0; // última partida cujo resultado já foi mostrado
 
+    // Sinal de vida: toda gravação minha já atualiza o lastSeen, então o
+    // heartbeat só grava se eu fiquei 30 s sem gravar nada (ex.: na vez do outro).
     const beat = () => heartbeat(code, uid).catch(() => {});
     beat();
-    const beatTimer = setInterval(beat, PRESENCE_INTERVAL_MS);
+    const beatTimer = setInterval(() => {
+      if (msSinceLastWrite(code) >= PRESENCE_INTERVAL_MS) beat();
+    }, HEARTBEAT_CHECK_MS);
     const presenceTimer = setInterval(refreshPresence, PRESENCE_CHECK_MS);
 
     const stopWatch = watchRoom(
       code,
-      (next, { pending }) => {
+      (next, { pending, fromCache }) => {
         if (closed) return;
+        connection.setFromCache(fromCache);
         if (!next) {
+          if (fromCache) return; // sem conexão: o cache ainda não tem a sala
           exit('Essa sala não existe mais.');
           return;
         }
@@ -309,6 +335,7 @@ export function startOnline(root, { roomCode, settings, saveSettings, onHome }) 
       stopWatch();
       clearInterval(beatTimer);
       clearInterval(presenceTimer);
+      connection.setFromCache(false);
       screen?.destroy?.();
       screen = null;
     }
